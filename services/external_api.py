@@ -1,7 +1,8 @@
 # services/external_api.py
-import requests
+import requests, re
 from config import Config
 import datetime
+from datetime import date, timedelta
 
 # In-memory stores for persistence (for demonstration only)
 user_preferences = {}  # Maps user_id to preferences
@@ -11,28 +12,50 @@ subscriptions = {}  # Maps (location, alert_type) or (location, condition) to su
 
 
 def geocode_location(location):
+    """
+    Uses OpenStreetMap Nominatim API to convert a location name into latitude and longitude.
+    It requests up to 5 results and selects the best candidate by 'importance'.
+    The function forces English results and checks if the candidate's display_name (in English)
+    contains the query (as a substring, case-insensitive). If not, it returns (None, None).
+    """
+    location = location.strip()
+    if not location:
+        return None, None
+
     url = "https://nominatim.openstreetmap.org/search"
     params = {
         "q": location,
         "format": "json",
-        "limit": 1
+        "addressdetails": 1,
+        "limit": 5
     }
     headers = {
-        "User-Agent": "WeatherAggregatorAPI/1.0 (francinesayson59@gmail.com)"
+        "User-Agent": "WeatherAggregatorAPI/1.0 (youremail@example.com)",
+        "Accept-Language": "en"  # Force English output for display_name.
     }
     try:
         response = requests.get(url, params=params, headers=headers, timeout=10)
         response.raise_for_status()
         data = response.json()
         if data:
-            lat = float(data[0]['lat'])
-            lon = float(data[0]['lon'])
+            # Sort results by 'importance' in descending order.
+            sorted_results = sorted(data, key=lambda x: x.get("importance", 0), reverse=True)
+            best = sorted_results[0]
+            display_name = best.get("display_name", "").lower()
+            query_lower = location.lower()
+            importance = best.get("importance", 0)
+            # Accept the candidate if the query appears anywhere in the display_name
+            # (case-insensitive), or if the importance is high enough.
+            if query_lower not in display_name and importance < 0.1:
+                return None, None
+            lat = float(best.get("lat"))
+            lon = float(best.get("lon"))
             return lat, lon
         else:
             return None, None
     except Exception as e:
+        print("Geocoding error:", e)
         return None, None
-
 
 
 def get_current_weather(location):
@@ -166,15 +189,19 @@ def compare_weather(locations):
 
 def get_climate_data(region):
     """
-    Computes average climate data for the past 30 days for the given region.
-    Uses Open-Meteo's archive API.
+    Fetches climate data over the past 30 days for a given region.
+    It computes average maximum and minimum temperatures and precipitation.
     """
     lat, lon = geocode_location(region)
     if lat is None or lon is None:
         return {"error": "Could not geocode region."}
 
-    end_date = datetime.date.today() - datetime.timedelta(days=1)
-    start_date = end_date - datetime.timedelta(days=30)
+    from datetime import date, timedelta
+    # End date is yesterday (to ensure complete data)
+    end_date = date.today() - timedelta(days=1)
+    # Start date is 29 days before the end date (to cover 30 days)
+    start_date = end_date - timedelta(days=29)
+
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": lat,
@@ -188,9 +215,11 @@ def get_climate_data(region):
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
-        temps_max = data.get("daily", {}).get("temperature_2m_max", [])
-        temps_min = data.get("daily", {}).get("temperature_2m_min", [])
-        precip = data.get("daily", {}).get("precipitation_sum", [])
+        daily = data.get("daily", {})
+        # Filter out any None values from the lists
+        temps_max = [t for t in daily.get("temperature_2m_max", []) if t is not None]
+        temps_min = [t for t in daily.get("temperature_2m_min", []) if t is not None]
+        precip = [p for p in daily.get("precipitation_sum", []) if p is not None]
         if temps_max and temps_min and precip:
             avg_max = sum(temps_max) / len(temps_max)
             avg_min = sum(temps_min) / len(temps_min)
@@ -397,28 +426,49 @@ def get_realtime_weather(location):
     return data
 
 
-def get_next_7_days_forecast(location):
+def get_detailed_forecast(location):
     """
-        Fetch a 7-day forecast (or 5-day/3-hour forecast depending on the API) for the given location.
-        """
-    base_url = "http://api.openweathermap.org/data/2.5/forecast"
+    Fetches a detailed (hourly) forecast for the next 48 hours using WeatherAPI.com.
+    This version filters the response to only include a subset of fields (time, temp_c, and condition text).
+    """
+    url = "http://api.weatherapi.com/v1/forecast.json"
     params = {
+        "key": Config.WEATHERAPI_KEY,
         "q": location,
-        "appid": Config.OPENWEATHER_API_KEY,
-        "units": "metric"
+        "days": 3,  # Request forecast for 3 days (to cover at least 48 hours)
+        "aqi": "no",
+        "alerts": "no"
     }
     try:
-        response = requests.get(base_url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
-        return response.json()
-    except requests.exceptions.HTTPError as http_err:
-        return {
-            "error": "HTTP error occurred while fetching forecast.",
-            "details": str(http_err),
-            "status_code": response.status_code if response else None
+        data = response.json()
+
+        # Extract forecast data from the first 2 forecast days
+        forecast_days = data.get("forecast", {}).get("forecastday", [])
+        hourly_data = []
+        for day in forecast_days:
+            hourly = day.get("hour", [])
+            hourly_data.extend(hourly)
+
+        # Only take the next 48 hours
+        hourly_data = hourly_data[:48]
+
+        # Filter each hourly entry to include only a few keys:
+        filtered_hourly = []
+        for entry in hourly_data:
+            filtered_entry = {
+                "time": entry.get("time"),
+                "temp_c": entry.get("temp_c"),
+                "condition": entry.get("condition", {}).get("text")
+            }
+            filtered_hourly.append(filtered_entry)
+
+        # Return a simplified response
+        detailed_forecast = {
+            "location": data.get("location", {}),
+            "hourly": filtered_hourly
         }
-    except requests.exceptions.RequestException as req_err:
-        return {
-            "error": "Error occurred while fetching forecast.",
-            "details": str(req_err)
-        }
+        return detailed_forecast
+    except Exception as e:
+        return {"error": str(e)}

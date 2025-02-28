@@ -1,6 +1,6 @@
 # resources/weather.py
 from flask_restful import Resource, reqparse
-from services.external_api import get_current_weather, get_forecast, get_realtime_weather, get_next_7_days_forecast
+from services.external_api import get_current_weather, get_forecast, get_realtime_weather, get_climate_data, get_detailed_forecast, get_seasonal_changes
 
 class CurrentWeather(Resource):
     def get(self):
@@ -35,3 +35,10 @@ class Next7DaysForecast(Resource):
         data = get_forecast(args['location'])
         return {"status": "success", "data": data}, 200
 
+class DetailedForecast(Resource):
+    def get(self):
+        parser = reqparse.RequestParser()
+        parser.add_argument('location', type=str, required=True, help="Location is required")
+        args = parser.parse_args()
+        data = get_detailed_forecast(args['location'])
+        return {"status": "success", "data": data}, 200

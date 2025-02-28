@@ -1,6 +1,16 @@
 # resources/utilities.py
 from flask_restful import Resource, reqparse
 from services.external_api import get_historical_weather, submit_feedback
+import os
+
+class Config:
+    DEBUG = True
+    TESTING = False
+    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key')
+    # You can either store your WeatherAPI key in an environment variable or directly here.
+    WEATHERAPI_KEY = os.getenv('WEATHERAPI_KEY', 'your_weatherapi_key_here')
+    # If you're still using Open-Meteo for other endpoints, keep its key if needed.
+    OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', 'your_default_key')
 
 class HistoricalWeather(Resource):
     def get(self):
