@@ -21,20 +21,25 @@ class SubscribeAlert(Resource):
         args = parser.parse_args()
         result = subscribe_to_alert(user_id, args['location'], args['alert_type'])
         return {"status": "success", "message": result}, 201
+
 class CancelAlert(Resource):
+    @jwt_required()
     def delete(self):
+        user_id = get_jwt_identity()
         parser = reqparse.RequestParser()
         parser.add_argument('location', type=str, required=True, help="Location is required")
         parser.add_argument('alert_type', type=str, required=True, help="Alert type is required")
         args = parser.parse_args()
-        result = cancel_alert(args['location'], args['alert_type'])
+        result = cancel_alert(user_id, args['location'], args['alert_type'])
         return {"status": "success", "message": result}, 200
 
 class CustomAlert(Resource):
+    @jwt_required()
     def post(self):
+        user_id = get_jwt_identity()
         parser = reqparse.RequestParser()
         parser.add_argument('location', type=str, required=True, help="Location is required")
-        parser.add_argument('condition', type=str, required=True, help="Condition is required")
+        parser.add_argument('condition', type=str, required=True, help="Custom condition is required")
         args = parser.parse_args()
-        result = create_custom_alert(args['location'], args['condition'])
+        result = create_custom_alert(user_id, args['location'], args['condition'])
         return {"status": "success", "message": result}, 201

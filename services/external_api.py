@@ -298,20 +298,32 @@ def get_suggested_activities(location):
 
 def get_weather_recommendation(user_id):
     """
-    Provides a weather-based recommendation based on the user's stored location.
+    Provides a personalized weather-based recommendation for clothing or activities.
+    Retrieves the user's location from the database (using the UserLocation model). If not found, defaults to New York.
+    Then, it fetches current weather for that location and returns a recommendation based on the temperature.
     """
-    global user_locations
-    location = user_locations.get(user_id, "New York")  # Default if not set
-    weather = get_current_weather(location)
-    temp = weather.get("current_weather", {}).get("temperature", 20)
-    if temp > 25:
-        recommendation = "It's hot outside. Wear light clothing and stay hydrated."
-    elif temp < 10:
-        recommendation = "It's cold. Bundle up and wear warm clothes."
+    # Retrieve user location from the database
+    user_loc = UserLocation.query.filter_by(user_id=user_id).first()
+    if user_loc is None:
+        location = "New York"  # Default location if none is stored
     else:
-        recommendation = "The weather is moderate. Enjoy your day!"
-    return {"user_id": user_id, "location": location, "recommendation": recommendation}
+        location = user_loc.location
 
+    # Get current weather data for the location
+    weather = get_current_weather(location)
+    current_temp = weather.get("current_weather", {}).get("temperature")
+
+    # Create a simple recommendation based on the temperature
+    if current_temp is None:
+        recommendation = "Weather data unavailable."
+    elif current_temp > 25:
+        recommendation = "It's hot outside. Wear light clothing and stay hydrated. Consider outdoor activities like swimming."
+    elif current_temp < 10:
+        recommendation = "It's cold outside. Bundle up with warm clothing and consider indoor activities."
+    else:
+        recommendation = "The weather is moderate. Dress comfortably and enjoy your day!"
+
+    return {"user_id": user_id, "location": location, "recommendation": recommendation}
 
 def get_prediction_confidence(location):
     """
@@ -464,14 +476,11 @@ def cancel_alert(user_id, location, alert_type):
 
 
 # d pa naedit
-def create_custom_alert(location, condition):
-    """
-    Creates a custom alert and saves it in the MySQL database.
-    """
-    subscription = Subscription(location=location, alert_type=condition)
+def create_custom_alert(user_id, location, condition):
+    subscription = Subscription(user_id=user_id, location=location, alert_type=condition)
     db.session.add(subscription)
     db.session.commit()
-    return f"Custom alert for condition '{condition}' in {location} created."
+    return f"Custom alert for condition '{condition}' in {location} for user {user_id} created."
 
 def save_user_preferences(user_id, preferences):
     """

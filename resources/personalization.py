@@ -3,6 +3,7 @@ from flask_restful import Resource, reqparse
 from flask import request
 from marshmallow import ValidationError
 from schemas.preferences_schema import preferences_schema
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from services.external_api import (
     save_user_preferences,
     get_suggested_activities,
@@ -11,14 +12,18 @@ from services.external_api import (
     update_user_location
 )
 
+from flask_restful import Resource
+from flask import request
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from services.external_api import save_user_preferences
+
 class UserPreferences(Resource):
+    @jwt_required()
     def post(self):
-        json_data = request.get_json()
-        try:
-            data = preferences_schema.load(json_data)
-        except ValidationError as err:
-            return {"status": "error", "errors": err.messages}, 400
-        result = save_user_preferences(data['user_id'], data['preferences'])
+        user_id = get_jwt_identity()
+        # Expecting a JSON body with preferences
+        preferences = request.get_json(force=True)
+        result = save_user_preferences(user_id, preferences)
         return {"status": "success", "message": result}, 201
 
 class SuggestedActivities(Resource):
@@ -30,11 +35,10 @@ class SuggestedActivities(Resource):
         return {"status": "success", "data": data}, 200
 
 class WeatherRecommendation(Resource):
+    @jwt_required()
     def get(self):
-        parser = reqparse.RequestParser()
-        parser.add_argument('user_id', type=str, required=True, help="User ID is required")
-        args = parser.parse_args()
-        data = get_weather_recommendation(args['user_id'])
+        user_id = get_jwt_identity()
+        data = get_weather_recommendation(user_id)
         return {"status": "success", "data": data}, 200
 
 class PredictionConfidence(Resource):
@@ -46,10 +50,11 @@ class PredictionConfidence(Resource):
         return {"status": "success", "data": data}, 200
 
 class UpdateLocation(Resource):
+    @jwt_required()
     def put(self):
+        user_id = get_jwt_identity()
         parser = reqparse.RequestParser()
-        parser.add_argument('user_id', type=str, required=True, help="User ID is required")
         parser.add_argument('location', type=str, required=True, help="New location is required")
         args = parser.parse_args()
-        result = update_user_location(args['user_id'], args['location'])
+        result = update_user_location(user_id, args['location'])
         return {"status": "success", "message": result}, 200

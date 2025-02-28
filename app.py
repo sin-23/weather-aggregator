@@ -11,7 +11,7 @@ from resources.alerts import WeatherAlerts, SubscribeAlert, CancelAlert, CustomA
 from resources.comparisons import CompareWeather, ClimateData, TrendingWeather, SeasonalChanges
 from resources.personalization import UserPreferences, SuggestedActivities, WeatherRecommendation, PredictionConfidence, UpdateLocation
 from resources.utilities import HistoricalWeather, Feedback
-from auth import UserLogin, ProtectedResource
+from auth import UserRegistration, UserLogin, ProtectedResource
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -53,7 +53,8 @@ api.add_resource(UpdateLocation, '/weather/update-location')
 api.add_resource(HistoricalWeather, '/weather/historical')
 api.add_resource(Feedback, '/weather/feedback')
 
-# Register Authentication Endpoints
+# Register authentication endpoints
+api.add_resource(UserRegistration, '/register')
 api.add_resource(UserLogin, '/login')
 api.add_resource(ProtectedResource, '/protected')
 

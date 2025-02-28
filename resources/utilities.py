@@ -2,6 +2,7 @@
 from flask_restful import Resource, reqparse
 from services.external_api import get_historical_weather, submit_feedback
 import os
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 class Config:
     DEBUG = True
@@ -22,10 +23,13 @@ class HistoricalWeather(Resource):
         return {"status": "success", "data": data}, 200
 
 class Feedback(Resource):
+    @jwt_required()
     def post(self):
+        user_id = get_jwt_identity()
         parser = reqparse.RequestParser()
-        parser.add_argument('user_id', type=str, required=True, help="User ID is required")
         parser.add_argument('feedback', type=str, required=True, help="Feedback is required")
         args = parser.parse_args()
-        result = submit_feedback(args['user_id'], args['feedback'])
+        result = submit_feedback(user_id, args['feedback'])
         return {"status": "success", "message": result}, 201
+
+
