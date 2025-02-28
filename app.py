@@ -3,6 +3,7 @@ from flask import Flask, jsonify
 from flask_restful import Api
 from flask_jwt_extended import JWTManager
 from config import Config
+from models import db  # Import SQLAlchemy object
 
 # Import resource classes from the resources package
 from resources.weather import CurrentWeather, WeatherForecast, RealTimeWeather, Next7DaysForecast, DetailedForecast
@@ -14,8 +15,13 @@ from auth import UserLogin, ProtectedResource
 
 app = Flask(__name__)
 app.config.from_object(Config)
+db.init_app(app)
 api = Api(app)
 jwt = JWTManager(app)
+
+# Create the database tables if they don’t exist
+with app.app_context():
+    db.create_all()
 
 # Register Weather Endpoints
 api.add_resource(CurrentWeather, '/weather/current')

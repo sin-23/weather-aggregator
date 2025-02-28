@@ -3,6 +3,8 @@ import requests, re
 from config import Config
 import datetime
 from datetime import date, timedelta
+import difflib
+from models import db, Subscription, UserPreference, UserLocation, Feedback
 
 # In-memory stores for persistence (for demonstration only)
 user_preferences = {}  # Maps user_id to preferences
@@ -10,17 +12,32 @@ user_locations = {}  # Maps user_id to their location
 feedback_store = {}  # Maps user_id to list of feedback messages
 subscriptions = {}  # Maps (location, alert_type) or (location, condition) to subscription details
 
+# francinesayson59@gmail.com
+
+def normalize(text):
+    """Normalize text by stripping whitespace and converting to lowercase."""
+    return text.strip().lower() if text else ""
+
+
+def is_word_match(query, text, threshold=0.9):
+    """
+    Check if any word in text matches the query with a similarity above the threshold.
+    This helps ensure that candidate words closely resemble the query.
+    """
+    words = text.split()
+    for word in words:
+        ratio = difflib.SequenceMatcher(None, query, word.lower()).ratio()
+        if ratio >= threshold:
+            return True
+    return False
+
 
 def geocode_location(location):
-    """
-    Uses OpenStreetMap Nominatim API to convert a location name into latitude and longitude.
-    It requests up to 5 results and selects the best candidate by 'importance'.
-    The function forces English results and checks if the candidate's display_name (in English)
-    contains the query (as a substring, case-insensitive). If not, it returns (None, None).
-    """
     location = location.strip()
     if not location:
         return None, None
+
+    query_norm = normalize(location)
 
     url = "https://nominatim.openstreetmap.org/search"
     params = {
@@ -30,31 +47,41 @@ def geocode_location(location):
         "limit": 5
     }
     headers = {
-        "User-Agent": "WeatherAggregatorAPI/1.0 (youremail@example.com)",
-        "Accept-Language": "en"  # Force English output for display_name.
+        "User-Agent": "WeatherAggregatorAPI/1.0 (francinesayson59@gmail.com)",
+        "Accept-Language": "en"
     }
+
     try:
         response = requests.get(url, params=params, headers=headers, timeout=10)
         response.raise_for_status()
         data = response.json()
-        if data:
-            # Sort results by 'importance' in descending order.
-            sorted_results = sorted(data, key=lambda x: x.get("importance", 0), reverse=True)
-            best = sorted_results[0]
-            display_name = best.get("display_name", "").lower()
-            query_lower = location.lower()
-            importance = best.get("importance", 0)
-            # Accept the candidate if the query appears anywhere in the display_name
-            # (case-insensitive), or if the importance is high enough.
-            if query_lower not in display_name and importance < 0.1:
-                return None, None
-            lat = float(best.get("lat"))
-            lon = float(best.get("lon"))
-            return lat, lon
-        else:
+
+        if not data:
+            print(f"No results found for '{location}'")
             return None, None
-    except Exception as e:
-        print("Geocoding error:", e)
+
+        sorted_results = sorted(data, key=lambda x: x.get("importance", 0), reverse=True)
+
+        for candidate in sorted_results:
+            # Collect candidate fields where a place name might appear.
+            fields = []
+            address = candidate.get("address", {})
+            for field in ["city", "town", "village", "locality", "county", "state", "country"]:
+                if field in address:
+                    fields.append(address[field])
+            if candidate.get("display_name"):
+                fields.append(candidate.get("display_name"))
+
+            for field in fields:
+                field_norm = normalize(field)
+                if is_word_match(query_norm, field_norm):
+                    return float(candidate.get("lat")), float(candidate.get("lon"))
+
+        print(f"Location '{location}' not found with sufficient confidence.")
+        return None, None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Geocoding error: {e}")
         return None, None
 
 
@@ -136,45 +163,6 @@ def get_weather_alerts(location):
             return {"location": location, "alerts": "No severe alerts."}
     except Exception as e:
         return {"error": str(e)}
-
-
-def subscribe_to_alert(location, alert_type):
-    """
-    Stores a subscription for weather alerts in an in-memory dictionary.
-    """
-    key = (location, alert_type)
-    subscriptions[key] = {
-        "location": location,
-        "alert_type": alert_type,
-        "subscribed_at": datetime.datetime.now().isoformat()
-    }
-    return f"Subscribed to {alert_type} alerts for {location}."
-
-
-def cancel_alert(location, alert_type):
-    """
-    Cancels a previously stored alert subscription.
-    """
-    key = (location, alert_type)
-    if key in subscriptions:
-        del subscriptions[key]
-        return f"Cancelled {alert_type} alerts for {location}."
-    else:
-        return f"No active subscription for {alert_type} alerts in {location}."
-
-
-def create_custom_alert(location, condition):
-    """
-    Creates a custom alert by storing it in the in-memory subscriptions store.
-    """
-    key = (location, condition)
-    subscriptions[key] = {
-        "location": location,
-        "condition": condition,
-        "created_at": datetime.datetime.now().isoformat()
-    }
-    return f"Custom alert for condition '{condition}' in {location} created."
-
 
 def compare_weather(locations):
     """
@@ -290,16 +278,6 @@ def get_seasonal_changes(region):
     except Exception as e:
         return {"error": str(e)}
 
-
-def save_user_preferences(user_id, preferences):
-    """
-    Saves user preferences in an in-memory store.
-    """
-    global user_preferences
-    user_preferences[user_id] = preferences
-    return f"Preferences for user {user_id} saved."
-
-
 def get_suggested_activities(location):
     """
     Suggests activities based on the current temperature.
@@ -355,16 +333,6 @@ def get_prediction_confidence(location):
     except Exception as e:
         return {"error": str(e)}
 
-
-def update_user_location(user_id, location):
-    """
-    Updates a user's location in an in-memory store.
-    """
-    global user_locations
-    user_locations[user_id] = location
-    return f"User {user_id}'s location updated to {location}."
-
-
 def get_historical_weather(location, date):
     """
     Fetches historical weather data for a given location and date using Open-Meteo's archive API.
@@ -389,18 +357,6 @@ def get_historical_weather(location, date):
         return response.json()
     except Exception as e:
         return {"error": str(e)}
-
-
-def submit_feedback(user_id, feedback):
-    """
-    Stores user feedback in an in-memory list.
-    """
-    global feedback_store
-    if user_id not in feedback_store:
-        feedback_store[user_id] = []
-    feedback_store[user_id].append(feedback)
-    return f"Feedback from user {user_id} recorded."
-
 
 def get_realtime_weather(location):
     """
@@ -472,3 +428,84 @@ def get_detailed_forecast(location):
         return detailed_forecast
     except Exception as e:
         return {"error": str(e)}
+
+
+def subscribe_to_alert(user_id, location, alert_type):
+    """
+    Persists a subscription for weather alerts in the MySQL database.
+    If the user is already subscribed to the given alert type for the location,
+    a message is returned indicating that the subscription already exists.
+    """
+    # Check if the subscription already exists
+    existing = Subscription.query.filter_by(user_id=user_id, location=location, alert_type=alert_type).first()
+    if existing:
+        return f"User {user_id} is already subscribed to {alert_type} alerts for {location}."
+
+    # Otherwise, create and store the new subscription
+    subscription = Subscription(user_id=user_id, location=location, alert_type=alert_type)
+    db.session.add(subscription)
+    try:
+        db.session.commit()
+        return f"User {user_id} subscribed to {alert_type} alerts for {location}."
+    except Exception as e:
+        db.session.rollback()
+        return f"An error occurred: {str(e)}"
+
+
+def cancel_alert(user_id, location, alert_type):
+    subscription = Subscription.query.filter_by(user_id=user_id, location=location, alert_type=alert_type).first()
+    if subscription:
+        db.session.delete(subscription)
+        db.session.commit()
+        return f"Cancelled {alert_type} alerts for {location} for user {user_id}."
+    else:
+        return f"No active subscription for {alert_type} alerts in {location} for user {user_id}."
+
+
+
+# d pa naedit
+def create_custom_alert(location, condition):
+    """
+    Creates a custom alert and saves it in the MySQL database.
+    """
+    subscription = Subscription(location=location, alert_type=condition)
+    db.session.add(subscription)
+    db.session.commit()
+    return f"Custom alert for condition '{condition}' in {location} created."
+
+def save_user_preferences(user_id, preferences):
+    """
+    Saves user preferences in the MySQL database.
+    If preferences already exist for the user, they are updated.
+    """
+    user_pref = UserPreference.query.filter_by(user_id=user_id).first()
+    if user_pref:
+        user_pref.set_preferences(preferences)
+    else:
+        user_pref = UserPreference(user_id=user_id)
+        user_pref.set_preferences(preferences)
+        db.session.add(user_pref)
+    db.session.commit()
+    return f"Preferences for user {user_id} saved."
+
+def update_user_location(user_id, location):
+    """
+    Updates a user's location in the MySQL database.
+    """
+    user_loc = UserLocation.query.filter_by(user_id=user_id).first()
+    if user_loc:
+        user_loc.location = location
+    else:
+        user_loc = UserLocation(user_id=user_id, location=location)
+        db.session.add(user_loc)
+    db.session.commit()
+    return f"User {user_id}'s location updated to {location}."
+
+def submit_feedback(user_id, feedback):
+    """
+    Stores user feedback in the MySQL database.
+    """
+    fb = Feedback(user_id=user_id, feedback=feedback)
+    db.session.add(fb)
+    db.session.commit()
+    return f"Feedback from user {user_id} recorded."
