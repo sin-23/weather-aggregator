@@ -6,7 +6,7 @@ from config import Config
 from models import db  # Import SQLAlchemy object
 
 # Import resource classes from the resources package
-from resources.weather import CurrentWeather, WeatherForecast, RealTimeWeather, Next7DaysForecast, DetailedForecast
+from resources.weather import CurrentWeather, ForecastWithDate, RealTimeWeather, Next7DaysForecast, DetailedForecast
 from resources.alerts import WeatherAlerts, SubscribeAlert, CancelAlert, CustomAlert
 from resources.comparisons import CompareWeather, ClimateData, TrendingWeather, SeasonalChanges
 from resources.personalization import UserPreferences, SuggestedActivities, WeatherRecommendation, PredictionConfidence, UpdateLocation
@@ -25,10 +25,11 @@ with app.app_context():
 
 # Register Weather Endpoints
 api.add_resource(CurrentWeather, '/weather/current')
-api.add_resource(WeatherForecast, '/weather/forecast')
+api.add_resource(ForecastWithDate, '/weather/forecast')
 api.add_resource(RealTimeWeather, '/weather/real-time')
 api.add_resource(Next7DaysForecast, '/weather/next-7-days')
 api.add_resource(DetailedForecast, '/weather/forecast/detailed')
+
 
 # Register Alerts Endpoints
 api.add_resource(WeatherAlerts, '/weather/alerts')

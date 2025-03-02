@@ -1,5 +1,7 @@
 Flask
 Flask-RESTful
 Flask-JWT-Extended
+Flask-SQLAlchemy
 marshmallow
 requests
+beautifulsoup4

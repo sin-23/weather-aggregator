@@ -4,7 +4,10 @@ from config import Config
 import datetime
 from datetime import date, timedelta
 import difflib
+from flask import Flask, request, jsonify
 from models import db, Subscription, UserPreference, UserLocation, Feedback
+from bs4 import BeautifulSoup
+
 
 # In-memory stores for persistence (for demonstration only)
 user_preferences = {}  # Maps user_id to preferences
@@ -12,33 +15,15 @@ user_locations = {}  # Maps user_id to their location
 feedback_store = {}  # Maps user_id to list of feedback messages
 subscriptions = {}  # Maps (location, alert_type) or (location, condition) to subscription details
 
-# francinesayson59@gmail.com
 
 def normalize(text):
-    """Normalize text by stripping whitespace and converting to lowercase."""
     return text.strip().lower() if text else ""
-
-
-def is_word_match(query, text, threshold=0.9):
-    """
-    Check if any word in text matches the query with a similarity above the threshold.
-    This helps ensure that candidate words closely resemble the query.
-    """
-    words = text.split()
-    for word in words:
-        ratio = difflib.SequenceMatcher(None, query, word.lower()).ratio()
-        if ratio >= threshold:
-            return True
-    return False
-
 
 def geocode_location(location):
     location = location.strip()
     if not location:
-        return None, None
-
+        return None
     query_norm = normalize(location)
-
     url = "https://nominatim.openstreetmap.org/search"
     params = {
         "q": location,
@@ -47,51 +32,104 @@ def geocode_location(location):
         "limit": 5
     }
     headers = {
-        "User-Agent": "WeatherAggregatorAPI/1.0 (francinesayson59@gmail.com)",
+        "User-Agent": "WeatherAggregatorAPI/1.0 (youremail@example.com)",
         "Accept-Language": "en"
     }
-
     try:
         response = requests.get(url, params=params, headers=headers, timeout=10)
         response.raise_for_status()
         data = response.json()
-
         if not data:
             print(f"No results found for '{location}'")
-            return None, None
-
+            return None
         sorted_results = sorted(data, key=lambda x: x.get("importance", 0), reverse=True)
-
+        threshold = 0.65  # Lowered threshold to allow minor typos
         for candidate in sorted_results:
-            # Collect candidate fields where a place name might appear.
-            fields = []
             address = candidate.get("address", {})
+            candidate_fields = []
             for field in ["city", "town", "village", "locality", "county", "state", "country"]:
                 if field in address:
-                    fields.append(address[field])
+                    candidate_fields.append(address[field])
             if candidate.get("display_name"):
-                fields.append(candidate.get("display_name"))
-
-            for field in fields:
-                field_norm = normalize(field)
-                if is_word_match(query_norm, field_norm):
-                    return float(candidate.get("lat")), float(candidate.get("lon"))
-
+                candidate_fields.append(candidate.get("display_name"))
+            for field in candidate_fields:
+                norm_field = normalize(field)
+                # Accept if the query appears as a substring...
+                if query_norm in norm_field:
+                    lat = float(candidate.get("lat"))
+                    lon = float(candidate.get("lon"))
+                    name = address.get("city") or address.get("town") or address.get("village") or address.get("locality") or candidate.get("display_name")
+                    region = address.get("state") or address.get("county")
+                    country = address.get("country")
+                    return {"lat": lat, "lon": lon, "name": name, "region": region, "country": country}
+                else:
+                    # ...or if the similarity ratio is above the threshold.
+                    ratio = difflib.SequenceMatcher(None, query_norm, norm_field).ratio()
+                    if ratio >= threshold:
+                        lat = float(candidate.get("lat"))
+                        lon = float(candidate.get("lon"))
+                        name = address.get("city") or address.get("town") or address.get("village") or address.get("locality") or candidate.get("display_name")
+                        region = address.get("state") or address.get("county")
+                        country = address.get("country")
+                        return {"lat": lat, "lon": lon, "name": name, "region": region, "country": country}
         print(f"Location '{location}' not found with sufficient confidence.")
-        return None, None
-
+        return None
     except requests.exceptions.RequestException as e:
         print(f"Geocoding error: {e}")
-        return None, None
+        return None
 
+def get_weather_description(code):
+    """
+    Converts a numeric weather code into a human-readable description.
+    """
+    weather_code_map = {
+        0: "Clear sky",
+        1: "Mainly clear",
+        2: "Partly cloudy",
+        3: "Overcast",
+        45: "Fog",
+        48: "Depositing rime fog",
+        51: "Light drizzle",
+        53: "Moderate drizzle",
+        55: "Dense drizzle",
+        56: "Light freezing drizzle",
+        57: "Dense freezing drizzle",
+        61: "Slight rain",
+        63: "Moderate rain",
+        65: "Heavy rain",
+        66: "Light freezing rain",
+        67: "Heavy freezing rain",
+        71: "Slight snow fall",
+        73: "Moderate snow fall",
+        75: "Heavy snow fall",
+        77: "Snow grains",
+        80: "Slight rain showers",
+        81: "Moderate rain showers",
+        82: "Heavy rain showers",
+        85: "Slight snow showers",
+        86: "Heavy snow showers",
+        95: "Slight or moderate thunderstorm",
+        96: "Thunderstorm with slight hail",
+        99: "Thunderstorm with heavy hail"
+    }
+    return weather_code_map.get(code, "Unknown")
 
 def get_current_weather(location):
     """
     Fetches current weather data for a given location using Open-Meteo.
+    The returned JSON includes geocode details (name, region, country) at the top,
+    and a combined current_weather block where coded values (is_day, weathercode)
+    are converted to human-friendly values.
     """
-    lat, lon = geocode_location(location)
-    if lat is None or lon is None:
-        return {"error": "Could not geocode location."}
+    geocode_result = geocode_location(location)
+    if geocode_result is None:
+        return {"error": f"Could not geocode location '{location}'."}
+    lat, lon = geocode_result["lat"], geocode_result["lon"]
+    geocode_details = {
+        "name": geocode_result.get("name", "Unknown"),
+        "region": geocode_result.get("region", "Unknown"),
+        "country": geocode_result.get("country", "Unknown")
+    }
 
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
@@ -102,7 +140,20 @@ def get_current_weather(location):
     try:
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
-        return response.json()
+        weather_data = response.json()
+        # Remove unwanted keys
+        for key in ["generationtime_ms", "utc_offset_seconds", "timezone", "timezone_abbreviation"]:
+            weather_data.pop(key, None)
+        current = weather_data.get("current_weather", {})
+        formatted_current = {
+            "temperature_celsius": current.get("temperature"),
+            "wind_speed_kph": current.get("windspeed"),
+            "wind_direction": current.get("winddirection"),
+            "is_day": True if current.get("is_day") == 1 else False,
+            "weather_description": get_weather_description(current.get("weathercode"))
+        }
+        result = {"geocode": geocode_details, "current_weather": formatted_current}
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -113,40 +164,88 @@ def get_forecast(location, start_date=None):
     If start_date is provided (in YYYY-MM-DD format), the forecast starts from that day.
     Otherwise, it defaults to the next 7 days starting today.
     """
-    lat, lon = geocode_location(location)
-    if lat is None or lon is None:
-        return {"error": "Could not geocode location."}
+    # Get geocode details
+    geocode_result = geocode_location(location)
+    if geocode_result is None:
+        return {"error": f"Could not geocode location '{location}'."}
 
-    from datetime import date, timedelta
-    # Use today's date if no start_date is provided.
+    lat, lon = geocode_result["lat"], geocode_result["lon"]
+    geocode_details = {
+        "name": geocode_result.get("name", "Unknown"),
+        "region": geocode_result.get("region", "Unknown"),
+        "country": geocode_result.get("country", "Unknown")
+    }
+
+    # Determine start and end dates
     if start_date is None:
         start_date_obj = date.today()
     else:
         try:
             start_date_obj = date.fromisoformat(start_date)
-        except Exception as e:
+        except ValueError:
             return {"error": "Invalid start_date format. Use YYYY-MM-DD."}
-    # End date is 6 days after start_date (for a total of 7 days)
+
     end_date = (start_date_obj + timedelta(days=6)).isoformat()
     start_date = start_date_obj.isoformat()
 
+    # API Request
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat,
         "longitude": lon,
-        "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
+        "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode",
         "start_date": start_date,
         "end_date": end_date,
         "timezone": "auto"
     }
+
     try:
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+
+        # Format daily weather data with human-readable weather codes
+        daily_data = []
+        for i in range(len(data["daily"]["time"])):
+            daily_entry = {
+                "date": data["daily"]["time"][i],
+                "max_temp": f"{data['daily']['temperature_2m_max'][i]}°C",
+                "min_temp": f"{data['daily']['temperature_2m_min'][i]}°C",
+                "precipitation": f"{data['daily']['precipitation_sum'][i]} mm",
+                "weather": get_weather_description(data["daily"]["weathercode"][i])
+            }
+            daily_data.append(daily_entry)
+
+        # Final structured response
+        result = {
+            "geocode": geocode_details,
+            "forecast": daily_data
+        }
+        return result
+
     except Exception as e:
         return {"error": str(e)}
 
 
+def get_forecast_with_date(location, start_date):
+    """
+    Fetches a daily summary 7-day forecast for a given location starting from the provided start_date.
+    The start_date must be in YYYY-MM-DD format and within the next 7 days.
+    If the start_date is too far in the future, returns an error message.
+    """
+    # Validate the start_date format.
+    try:
+        start_date_obj = date.fromisoformat(start_date)
+    except ValueError:
+        return {"error": "Invalid start_date format. Use YYYY-MM-DD."}
+
+    # Check if the start_date is within the next 7 days.
+    max_forecast_date = date.today() + timedelta(days=7)
+    if start_date_obj > max_forecast_date:
+        return {"error": "start_date is too far in the future. Please choose a date within the next 7 days."}
+
+    # If valid, call the existing get_forecast function.
+    return get_forecast(location, start_date)
 
 def get_weather_alerts(location):
     """
@@ -168,10 +267,17 @@ def compare_weather(locations):
     """
     Compares current weather data for multiple locations.
     Expects 'locations' to be a list of location names.
+    For each location, it fetches the weather using get_current_weather,
+    which returns data with the values merged with their units and geocode details at the top.
     """
     results = {}
     for loc in locations:
-        results[loc] = get_current_weather(loc)
+        weather = get_current_weather(loc)
+        # If there's an error, store the error message.
+        if "error" in weather:
+            results[loc] = {"error": weather["error"]}
+        else:
+            results[loc] = weather
     return results
 
 
@@ -180,16 +286,23 @@ def get_climate_data(region):
     Fetches climate data over the past 30 days for a given region.
     It computes average maximum and minimum temperatures and precipitation.
     """
-    lat, lon = geocode_location(region)
-    if lat is None or lon is None:
-        return {"error": "Could not geocode region."}
+    # Get geocode details
+    geocode_result = geocode_location(region)
+    if geocode_result is None:
+        return {"error": f"Could not geocode region '{region}'."}
 
-    from datetime import date, timedelta
-    # End date is yesterday (to ensure complete data)
-    end_date = date.today() - timedelta(days=1)
-    # Start date is 29 days before the end date (to cover 30 days)
-    start_date = end_date - timedelta(days=29)
+    lat, lon = geocode_result["lat"], geocode_result["lon"]
+    geocode_details = {
+        "name": geocode_result.get("name", "Unknown"),
+        "region": geocode_result.get("region", "Unknown"),
+        "country": geocode_result.get("country", "Unknown")
+    }
 
+    # Define start and end dates for the past 30 days
+    end_date = date.today() - timedelta(days=1)  # End date is yesterday
+    start_date = end_date - timedelta(days=29)  # Start date is 29 days before
+
+    # API Request
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": lat,
@@ -199,53 +312,115 @@ def get_climate_data(region):
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
         "timezone": "auto"
     }
+
     try:
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         daily = data.get("daily", {})
-        # Filter out any None values from the lists
+
+        # Extract and filter climate data
         temps_max = [t for t in daily.get("temperature_2m_max", []) if t is not None]
         temps_min = [t for t in daily.get("temperature_2m_min", []) if t is not None]
         precip = [p for p in daily.get("precipitation_sum", []) if p is not None]
+
         if temps_max and temps_min and precip:
             avg_max = sum(temps_max) / len(temps_max)
             avg_min = sum(temps_min) / len(temps_min)
             avg_precip = sum(precip) / len(precip)
-            return {
-                "region": region,
-                "average_max_temp": f"{avg_max:.1f}°C",
-                "average_min_temp": f"{avg_min:.1f}°C",
-                "average_precipitation": f"{avg_precip:.1f} mm"
+
+            result = {
+                "geocode": geocode_details,
+                "climate_summary": {
+                    "average_max_temp": f"{avg_max:.1f}°C",
+                    "average_min_temp": f"{avg_min:.1f}°C",
+                    "average_precipitation": f"{avg_precip:.1f} mm"
+                }
             }
+            return result
         else:
             return {"error": "No climate data available."}
+
     except Exception as e:
         return {"error": str(e)}
 
 
+
+def get_trending_cities():
+    """
+    Scrapes Wikipedia's "List of cities proper by population" page to dynamically obtain
+    a list of trending (largest) cities. Instead of using a fixed cell index, it loops
+    through the cells in each row and returns the first anchor whose text contains letters.
+    Returns the top 5 city names.
+    """
+    url = "https://en.wikipedia.org/wiki/Wikipedia:WikiProject_Cities/Popular_pages"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        table = soup.find("table", class_="wikitable")
+        trending = []
+        rows = table.find_all("tr")[1:6]  # Skip header; get top 5 rows
+        for row in rows:
+            cells = row.find_all("td")
+            city = None
+            # Loop through each cell to find an anchor tag with alphabetic text.
+            for cell in cells:
+                anchor = cell.find("a")
+                if anchor:
+                    text = anchor.get_text(strip=True)
+                    if any(char.isalpha() for char in text):
+                        city = text
+                        break
+            if city:
+                trending.append(city)
+        return trending
+    except Exception as e:
+        print("Error scraping trending cities from Wikipedia:", e)
+        return []
+
 def get_trending_weather():
     """
-    Fetches current weather for a list of major cities.
+    Fetches current weather for trending cities determined dynamically by scraping Wikipedia.
+    If scraping fails or returns an empty list, falls back to a preset list.
     """
-    cities = ["New York", "London", "Tokyo", "Sydney", "Paris"]
+    trending_cities = get_trending_cities()
+    if not trending_cities:
+        trending_cities = ["Chicago", "London", "Tokyo", "Sydney", "Paris"]
     results = {}
-    for city in cities:
+    for city in trending_cities:
         results[city] = get_current_weather(city)
     return {"trending_weather": results}
 
 
 def get_seasonal_changes(region):
     """
-    Compares current weather to the same day last year (using historical data)
-    to indicate seasonal changes.
+    Compares current weather to the same day last year to indicate seasonal changes.
+    Returns a dictionary with geocode details at the top and a seasonal summary.
     """
-    lat, lon = geocode_location(region)
-    if lat is None or lon is None:
-        return {"error": "Could not geocode region."}
+    # Get geocode details for the region.
+    geocode_result = geocode_location(region)
+    if geocode_result is None:
+        return {"error": f"Could not geocode region '{region}'."}
+    lat, lon = geocode_result["lat"], geocode_result["lon"]
+    geocode_details = {
+        "name": geocode_result.get("name", "Unknown"),
+        "region": geocode_result.get("region", "Unknown"),
+        "country": geocode_result.get("country", "Unknown")
+    }
 
+    # Get current weather data.
     current = get_current_weather(region)
-    last_year_date = (datetime.date.today() - datetime.timedelta(days=365)).isoformat()
+    if not current or "error" in current:
+        return {"error": "No current weather data available."}
+
+    # Look for the temperature under 'temperature_celsius'
+    current_temp = current.get("current_weather", {}).get("temperature_celsius")
+    if current_temp is None:
+        return {"error": "No current temperature available."}
+
+    # Calculate the date for the same day last year.
+    last_year_date = (date.today() - timedelta(days=365)).isoformat()
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": lat,
@@ -255,6 +430,7 @@ def get_seasonal_changes(region):
         "daily": "temperature_2m_max,temperature_2m_min",
         "timezone": "auto"
     }
+
     try:
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
@@ -264,111 +440,251 @@ def get_seasonal_changes(region):
             return {"error": "No historical data available."}
         historical_max = historical_daily["temperature_2m_max"][0]
         historical_min = historical_daily["temperature_2m_min"][0]
-        current_temp = current.get("current_weather", {}).get("temperature", None)
-        if current_temp is None:
-            return {"error": "No current temperature available."}
         historical_avg = (historical_max + historical_min) / 2
         change = current_temp - historical_avg
-        return {
-            "region": region,
+
+        seasonal_summary = {
             "current_temperature": f"{current_temp}°C",
             "historical_average": f"{historical_avg:.1f}°C",
-            "change": f"{change:.1f}°C"
+            "temperature_change": f"{change:.1f}°C"
         }
+        result = {
+            "geocode": geocode_details,
+            "seasonal_changes": seasonal_summary
+        }
+        return result
     except Exception as e:
         return {"error": str(e)}
+
 
 def get_suggested_activities(location):
     """
     Suggests activities based on the current temperature.
+    If weather data is not available, returns an error message.
     """
     weather = get_current_weather(location)
-    try:
-        temp = weather.get("current_weather", {}).get("temperature", 20)
-        if temp > 25:
-            activities = ["Go swimming", "Have a picnic"]
-        elif temp > 15:
-            activities = ["Go hiking", "Cycle in the park"]
-        else:
-            activities = ["Visit a museum", "Read a book indoors"]
-    except Exception:
-        activities = ["General indoor activity"]
+    if not weather or "error" in weather:
+        return {"location": location, "error": "Weather data not available."}
+
+    current_weather = weather.get("current_weather", {})
+    # Use the key "temperature_celsius" from the formatted current weather
+    if "temperature_celsius" not in current_weather or current_weather.get("temperature_celsius") is None:
+        return {"location": location, "error": "Weather data not available."}
+
+    temp = current_weather.get("temperature_celsius")
+
+    if temp > 35:
+        activities = [
+            "Stay indoors in an air-conditioned mall",
+            "Enjoy a cold smoothie at a trendy cafe",
+            "Attend an indoor concert or show"
+        ]
+    elif temp > 30:
+        activities = [
+            "Go swimming at a nearby pool or beach",
+            "Have an outdoor picnic in the shade",
+            "Try water sports or take a boat ride to cool off"
+        ]
+    elif temp > 25:
+        activities = [
+            "Take a leisurely walk in the park",
+            "Go cycling or rollerblading",
+            "Enjoy an iced coffee outdoors"
+        ]
+    elif temp > 20:
+        activities = [
+            "Go hiking on a nature trail",
+            "Have a light outdoor brunch with friends",
+            "Go for a scenic drive"
+        ]
+    elif temp > 15:
+        activities = [
+            "Explore a museum or art gallery",
+            "Visit a local historical site",
+            "Enjoy a quiet afternoon at a cafe"
+        ]
+    elif temp > 10:
+        activities = [
+            "Relax at a cozy cafe with a warm drink",
+            "Browse a bookstore or library",
+            "Watch a movie at a theater"
+        ]
+    elif temp > 5:
+        activities = [
+            "Stay indoors and try a new recipe",
+            "Play board games with friends or family",
+            "Enjoy a warm cup of tea while reading"
+        ]
+    else:
+        activities = [
+            "Stay warm indoors and watch a movie marathon",
+            "Try crafting or another indoor hobby",
+            "Cook a hearty meal and relax at home"
+        ]
+
     return {"location": location, "suggested_activities": activities}
 
 
 def get_weather_recommendation(user_id):
     """
     Provides a personalized weather-based recommendation for clothing or activities.
-    Retrieves the user's location from the database (using the UserLocation model). If not found, defaults to New York.
+    Retrieves the user's location from the database using the UserLocation model.
+    If no location is stored, returns an error asking the user to update their location.
     Then, it fetches current weather for that location and returns a recommendation based on the temperature.
     """
-    # Retrieve user location from the database
+    # Retrieve the user's stored location.
     user_loc = UserLocation.query.filter_by(user_id=user_id).first()
     if user_loc is None:
-        location = "New York"  # Default location if none is stored
-    else:
-        location = user_loc.location
+        return {"user_id": user_id, "error": "No location found. Please update your location first."}
+    location = user_loc.location
 
-    # Get current weather data for the location
+    # Fetch current weather data.
     weather = get_current_weather(location)
-    current_temp = weather.get("current_weather", {}).get("temperature")
+    if not weather or "error" in weather:
+        return {"user_id": user_id, "location": location, "error": "Weather data not available."}
 
-    # Create a simple recommendation based on the temperature
-    if current_temp is None:
-        recommendation = "Weather data unavailable."
-    elif current_temp > 25:
-        recommendation = "It's hot outside. Wear light clothing and stay hydrated. Consider outdoor activities like swimming."
-    elif current_temp < 10:
-        recommendation = "It's cold outside. Bundle up with warm clothing and consider indoor activities."
+    current_weather = weather.get("current_weather", {})
+    # Try to get the temperature from "temperature_celsius", fall back to "temperature" if needed.
+    temp = current_weather.get("temperature_celsius")
+    if temp is None:
+        temp = current_weather.get("temperature")
+    if temp is None:
+        return {"user_id": user_id, "location": location, "error": "No current temperature available."}
+
+    # Generate recommendation based on temperature ranges.
+    if temp > 35:
+        recommendation = "It's extremely hot. Opt for very light clothing, stay hydrated, and avoid prolonged outdoor activities."
+    elif temp > 30:
+        recommendation = "It's very hot. Wear shorts and a tank top, and consider cooling activities like swimming."
+    elif temp > 25:
+        recommendation = "It's hot. Choose light clothing and consider outdoor activities such as a picnic or beach visit."
+    elif temp > 20:
+        recommendation = "It's warm. A light jacket or layers might be comfortable. Enjoy a walk in the park."
+    elif temp > 15:
+        recommendation = "The weather is moderate. Dress comfortably and enjoy outdoor leisure."
+    elif temp > 10:
+        recommendation = "It's a bit cool. Consider a sweater and perhaps indoor activities or a quiet stroll."
+    elif temp > 5:
+        recommendation = "It's chilly. Dress warmly with layers and consider indoor activities."
     else:
-        recommendation = "The weather is moderate. Dress comfortably and enjoy your day!"
+        recommendation = "It's extremely cold. Wear heavy clothing and, if possible, stay indoors and keep warm."
 
     return {"user_id": user_id, "location": location, "recommendation": recommendation}
+
 
 def get_prediction_confidence(location):
     """
     Computes a rough prediction confidence based on the difference between
-    current temperature and the average forecasted maximum.
+    the current temperature and the average forecasted maximum for the next 7 days.
+    Returns a dictionary with geocode details at the top and a confidence percentage.
     """
+    # Fetch current weather and forecast data.
     current = get_current_weather(location)
     forecast = get_forecast(location)
-    try:
-        current_temp = current.get("current_weather", {}).get("temperature")
-        forecast_temps = forecast.get("daily", {}).get("temperature_2m_max", [])
-        if forecast_temps and current_temp is not None:
-            forecast_avg = sum(forecast_temps) / len(forecast_temps)
-            diff = abs(current_temp - forecast_avg)
-            confidence = max(0, 100 - diff * 5)  # Arbitrary formula for demonstration
-            return {"location": location, "confidence": f"{confidence:.0f}%"}
-        else:
-            return {"error": "Forecast data unavailable for prediction confidence."}
-    except Exception as e:
-        return {"error": str(e)}
 
-def get_historical_weather(location, date):
+    if not current or "error" in current:
+        return {"error": "Current weather data not available."}
+    if not forecast or "error" in forecast:
+        return {"error": "Forecast data not available for prediction confidence."}
+
+    # Extract current temperature from the current weather data.
+    current_weather = current.get("current_weather", {})
+    current_temp = current_weather.get("temperature_celsius") or current_weather.get("temperature")
+    if current_temp is None:
+        return {"error": "No current temperature available."}
+    try:
+        current_temp = float(current_temp)
+    except Exception:
+        return {"error": "Current temperature is not a valid number."}
+
+    # Extract forecast data from the forecast list.
+    forecast_list = forecast.get("forecast", [])
+    if not forecast_list:
+        return {"error": "No forecast data available for prediction confidence."}
+
+    forecast_temps = []
+    for day in forecast_list:
+        max_temp_str = day.get("max_temp", "")  # e.g., "30.5°C"
+        if max_temp_str:
+            try:
+                temp_val = float(max_temp_str.split("°")[0])
+                forecast_temps.append(temp_val)
+            except Exception:
+                continue
+    if not forecast_temps:
+        return {"error": "Forecast temperature data unavailable for prediction confidence."}
+
+    forecast_avg = sum(forecast_temps) / len(forecast_temps)
+    diff = abs(current_temp - forecast_avg)
+    confidence = max(0, 100 - diff * 5)  # Arbitrary formula
+
+    # Use geocode details from current weather data.
+    geocode_details = current.get("geocode", {"name": location})
+
+    return {
+        "geocode": geocode_details,
+        "location": location,
+        "confidence": f"{confidence:.0f}%"
+    }
+
+
+def get_historical_weather(location, date_str):
     """
     Fetches historical weather data for a given location and date using Open-Meteo's archive API.
-    The 'date' should be in YYYY-MM-DD format.
+    The 'date_str' should be in YYYY-MM-DD format.
+    Returns a dictionary with geocode details at the top and a structured historical weather summary,
+    where values are combined with their units.
     """
-    lat, lon = geocode_location(location)
-    if lat is None or lon is None:
-        return {"error": "Could not geocode location."}
+    geocode_result = geocode_location(location)
+    if geocode_result is None:
+        return {"error": f"Could not geocode location '{location}'."}
+    lat, lon = geocode_result["lat"], geocode_result["lon"]
+    geocode_details = {
+        "name": geocode_result.get("name", "Unknown"),
+        "region": geocode_result.get("region", "Unknown"),
+        "country": geocode_result.get("country", "Unknown")
+    }
 
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": lat,
         "longitude": lon,
-        "start_date": date,
-        "end_date": date,
+        "start_date": date_str,
+        "end_date": date_str,
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
         "timezone": "auto"
     }
+
     try:
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        daily = data.get("daily", {})
+        units = data.get("daily_units", {})
+
+        # Check if all required fields exist and contain data.
+        if not (daily.get("time") and daily.get("temperature_2m_max") and daily.get("temperature_2m_min") and daily.get(
+                "precipitation_sum")):
+            return {"error": "No historical data available."}
+
+        daily_summary = []
+        for i in range(len(daily["time"])):
+            day_summary = {
+                "date": daily["time"][i],
+                "max_temp": f"{daily['temperature_2m_max'][i]} {units.get('temperature_2m_max', '').strip()}",
+                "min_temp": f"{daily['temperature_2m_min'][i]} {units.get('temperature_2m_min', '').strip()}",
+                "precipitation": f"{daily['precipitation_sum'][i]} {units.get('precipitation_sum', '').strip()}"
+            }
+            daily_summary.append(day_summary)
+
+        result = {
+            "geocode": geocode_details,
+            "historical_weather": daily_summary
+        }
+        return result
     except Exception as e:
         return {"error": str(e)}
+
 
 def get_realtime_weather(location):
     """
@@ -396,14 +712,14 @@ def get_realtime_weather(location):
 
 def get_detailed_forecast(location):
     """
-    Fetches a detailed (hourly) forecast for the next 48 hours using WeatherAPI.com.
-    This version filters the response to only include a subset of fields (time, temp_c, and condition text).
+    Fetches a detailed (hourly) forecast for the next 24 hours using WeatherAPI.com.
+    If the API returns a 400 error, it returns a friendly error message.
     """
     url = "http://api.weatherapi.com/v1/forecast.json"
     params = {
         "key": Config.WEATHERAPI_KEY,
         "q": location,
-        "days": 3,  # Request forecast for 3 days (to cover at least 48 hours)
+        "days": 3,  # Request forecast for 3 days to ensure sufficient hourly data.
         "aqi": "no",
         "alerts": "no"
     }
@@ -412,32 +728,38 @@ def get_detailed_forecast(location):
         response.raise_for_status()
         data = response.json()
 
-        # Extract forecast data from the first 2 forecast days
+        # Gather hourly forecast data from all forecast days.
         forecast_days = data.get("forecast", {}).get("forecastday", [])
         hourly_data = []
         for day in forecast_days:
             hourly = day.get("hour", [])
             hourly_data.extend(hourly)
+        # Limit the forecast to the next 24 hours.
+        hourly_data = hourly_data[:24]
 
-        # Only take the next 48 hours
-        hourly_data = hourly_data[:48]
-
-        # Filter each hourly entry to include only a few keys:
+        # Build a more detailed output for each hourly forecast.
         filtered_hourly = []
         for entry in hourly_data:
             filtered_entry = {
                 "time": entry.get("time"),
                 "temp_c": entry.get("temp_c"),
-                "condition": entry.get("condition", {}).get("text")
+                "condition": entry.get("condition", {}).get("text"),
+                "wind_kph": entry.get("wind_kph"),
+                "wind_dir": entry.get("wind_dir"),
+                "humidity": entry.get("humidity"),
+                "chance_of_rain": entry.get("chance_of_rain"),
             }
             filtered_hourly.append(filtered_entry)
 
-        # Return a simplified response
-        detailed_forecast = {
+        return {
             "location": data.get("location", {}),
             "hourly": filtered_hourly
         }
-        return detailed_forecast
+    except requests.exceptions.HTTPError as http_err:
+        if response.status_code == 400:
+            return {"error": "Location could not be geocoded. Please check your input."}
+        else:
+            return {"error": str(http_err)}
     except Exception as e:
         return {"error": str(e)}
 
