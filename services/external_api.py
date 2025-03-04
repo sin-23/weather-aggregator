@@ -267,21 +267,68 @@ def get_forecast_with_date(location, start_date):
     # If valid, call the existing get_forecast function.
     return get_forecast(location, start_date)
 
+
 def get_weather_alerts(location):
     """
-    Fetches weather alerts by checking the forecast.
-    For example, if the precipitation for today exceeds a threshold, an alert is returned.
+    Fetches weather alerts for a given location using real-time weather data
+    from get_current_weather. It analyzes the current temperature, wind speed,
+    and weather description to generate alerts for severe conditions.
+
+    Alerts Conditions:
+      - Temperature:
+          >40°C: "Extreme heat warning"
+          >38°C: "High temperature alert"
+      - Wind Speed:
+          >60 km/h: "Severe wind warning"
+          >40 km/h: "Strong winds expected"
+      - Weather Description:
+          If it contains "thunderstorm" or "rain":
+              if it contains "heavy": "Heavy rain and thunderstorms expected"
+              else: "Rain and possible thunderstorms detected"
+      - If none of the above, it returns a general advisory.
     """
-    forecast = get_forecast(location)
-    try:
-        # For simplicity, check today's precipitation value
-        precip = forecast.get("daily", {}).get("precipitation_sum", [0])[0]
-        if precip > 10:
-            return {"location": location, "alerts": "Heavy rainfall expected."}
+    # Get current weather data (which includes geocode details)
+    current = get_current_weather(location)
+    if not current or "error" in current:
+        return {"error": "Weather data not available."}
+
+    current_weather = current.get("current_weather", {})
+    if not current_weather:
+        return {"error": "No current weather data available."}
+
+    # Extract values (assumed to be numeric) and description
+    temp = current_weather.get("temperature_celsius")  # should be numeric
+    wind_speed = current_weather.get("wind_speed_kph")
+    description = current_weather.get("weather_description", "").lower()
+
+    alerts = []
+    # Check temperature-based alerts
+    if temp is not None:
+        if temp > 40:
+            alerts.append("Extreme heat warning: temperatures exceeding 40°C.")
+        elif temp > 38:
+            alerts.append("High temperature alert: please take precautions in high heat.")
+
+    # Check wind speed alerts
+    if wind_speed is not None:
+        if wind_speed > 60:
+            alerts.append("Severe wind warning: strong gusts detected.")
+        elif wind_speed > 40:
+            alerts.append("Strong winds expected. Secure loose items outdoors.")
+
+    # Check precipitation/thunderstorm alerts based on weather description
+    if "thunderstorm" in description or "rain" in description:
+        if "heavy" in description:
+            alerts.append("Heavy rain and thunderstorms expected.")
         else:
-            return {"location": location, "alerts": "No severe alerts."}
-    except Exception as e:
-        return {"error": str(e)}
+            alerts.append("Rain and possible thunderstorms detected.")
+
+    # If no alert conditions met, provide a general advisory.
+    if not alerts:
+        alerts.append("No severe alerts detected. Conditions are stable.")
+
+    return {"location": location, "alerts": alerts}
+
 
 def compare_weather(locations):
     """
@@ -816,8 +863,6 @@ def cancel_alert(user_id, location, alert_type):
         return f"No active subscription for {alert_type} alerts in {location} for user {user_id}."
 
 
-
-# d pa naedit
 def create_custom_alert(user_id, location, condition):
     subscription = Subscription(user_id=user_id, location=location, alert_type=condition)
     db.session.add(subscription)
