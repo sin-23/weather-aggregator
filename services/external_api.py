@@ -1,13 +1,14 @@
 # services/external_api.py
 import requests, re
 from config import Config
-import datetime
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import difflib
 from flask import Flask, request, jsonify
-from models import db, Subscription, UserPreference, UserLocation, Feedback
+from models import db, Subscription, UserPreference, UserLocation, Feedback, UserSearchHistory
 from bs4 import BeautifulSoup
-
+from flask_jwt_extended import get_jwt_identity
+from collections import Counter
+from sqlalchemy import desc
 
 # In-memory stores for persistence (for demonstration only)
 user_preferences = {}  # Maps user_id to preferences
@@ -15,6 +16,20 @@ user_locations = {}  # Maps user_id to their location
 feedback_store = {}  # Maps user_id to list of feedback messages
 subscriptions = {}  # Maps (location, alert_type) or (location, condition) to subscription details
 
+def log_user_search(user_id, location):
+    """
+    Logs a search for a given location by a user.
+    If a record exists, increments the search_count and updates last_searched.
+    Otherwise, creates a new record.
+    """
+    record = UserSearchHistory.query.filter_by(user_id=user_id, location=location).first()
+    if record:
+        record.search_count += 1
+        record.last_searched = datetime.utcnow()
+    else:
+        record = UserSearchHistory(user_id=user_id, location=location, search_count=1)
+        db.session.add(record)
+    db.session.commit()
 
 def normalize(text):
     return text.strip().lower() if text else ""
@@ -114,13 +129,18 @@ def get_weather_description(code):
     }
     return weather_code_map.get(code, "Unknown")
 
-def get_current_weather(location):
+
+def get_current_weather(location, user_id=None):
     """
     Fetches current weather data for a given location using Open-Meteo.
-    The returned JSON includes geocode details (name, region, country) at the top,
-    and a combined current_weather block where coded values (is_day, weathercode)
-    are converted to human-friendly values.
+    If a user_id is provided, logs the search for that user.
+    Returns a JSON with geocode details (name, region, country) at the top,
+    and a combined current_weather block with human-friendly values.
     """
+    # Log the search if user_id is provided.
+    if user_id:
+        log_user_search(user_id, location)
+
     geocode_result = geocode_location(location)
     if geocode_result is None:
         return {"error": f"Could not geocode location '{location}'."}
@@ -141,7 +161,7 @@ def get_current_weather(location):
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         weather_data = response.json()
-        # Remove unwanted keys
+        # Remove unwanted keys.
         for key in ["generationtime_ms", "utc_offset_seconds", "timezone", "timezone_abbreviation"]:
             weather_data.pop(key, None)
         current = weather_data.get("current_weather", {})
@@ -818,6 +838,29 @@ def save_user_preferences(user_id, preferences):
         db.session.add(user_pref)
     db.session.commit()
     return f"Preferences for user {user_id} saved."
+
+def get_user_preferences(user_id):
+    """
+    Retrieves the user's top searched locations based on frequency (search_count).
+    Returns a dictionary containing the user's ID and a list of the top five searched locations.
+    """
+    search_history = UserSearchHistory.query.filter_by(user_id=user_id).order_by(desc(UserSearchHistory.search_count)).limit(5).all()
+    top_locations = [record.location for record in search_history]
+    return {"user_id": user_id, "top_searches": top_locations}
+
+def get_default_location(user_id, provided_location=None):
+    """
+    Returns the provided_location if available.
+    Otherwise, retrieves the user's preferences and returns the top searched location.
+    If no preferences exist, returns None.
+    """
+    if provided_location:
+        return provided_location
+    prefs = get_user_preferences(user_id)
+    top_searches = prefs.get("top_searches", [])
+    if top_searches:
+        return top_searches[0]
+    return None
 
 def update_user_location(user_id, location):
     """

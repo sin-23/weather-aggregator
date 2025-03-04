@@ -43,6 +43,17 @@ class UserPreference(db.Model):
     def get_preferences(self):
         return json.loads(self.preferences)
 
+class UserSearchHistory(db.Model):
+    __tablename__ = "user_search_history"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(100), nullable=False)
+    location = db.Column(db.String(255), nullable=False)
+    search_count = db.Column(db.Integer, default=1)
+    last_searched = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint('user_id', 'location', name='unique_user_location'),)
+
+    def __repr__(self):
+        return f"<UserSearchHistory user:{self.user_id} location:{self.location} count:{self.search_count}>"
 
 class UserLocation(db.Model):
     __tablename__ = "user_locations"

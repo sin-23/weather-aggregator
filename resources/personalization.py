@@ -9,7 +9,8 @@ from services.external_api import (
     get_suggested_activities,
     get_weather_recommendation,
     get_prediction_confidence,
-    update_user_location
+    update_user_location,
+    get_user_preferences
 )
 
 from flask_restful import Resource
@@ -19,12 +20,18 @@ from services.external_api import save_user_preferences
 
 class UserPreferences(Resource):
     @jwt_required()
+    def get(self):
+        user_id = get_jwt_identity()
+        return {"status": "success", "data": get_user_preferences(user_id)}, 200
+
+    @jwt_required()
     def post(self):
         user_id = get_jwt_identity()
-        # Expecting a JSON body with preferences
-        preferences = request.get_json(force=True)
-        result = save_user_preferences(user_id, preferences)
-        return {"status": "success", "message": result}, 201
+        parser = reqparse.RequestParser()
+        parser.add_argument('preferences', type=dict, required=True, help="Preferences are required")
+        args = parser.parse_args()
+        message = save_user_preferences(user_id, args['preferences'])
+        return {"status": "success", "message": message}, 201
 
 class SuggestedActivities(Resource):
     def get(self):

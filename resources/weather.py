@@ -4,19 +4,28 @@ from flask import jsonify
 from flask import Response, stream_with_context
 from flask_restful import Resource, reqparse, request
 from services.external_api import get_current_weather, get_forecast, get_realtime_weather, get_detailed_forecast, \
-    get_forecast_with_date
+    get_forecast_with_date, get_default_location
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 
 class CurrentWeather(Resource):
+    @jwt_required()
     def get(self):
         parser = reqparse.RequestParser()
-        parser.add_argument('location', type=str, required=True, help="Location is required")
+        parser.add_argument('location', type=str, required=False, help="Location is optional")
         args = parser.parse_args()
-        data = get_current_weather(args['location'])
+
+        user_id = get_jwt_identity()
+        location = get_default_location(user_id, args.get("location"))
+        if not location:
+            return {"error": "No location provided and no preferences found. Please update your location."}, 400
+
+        data = get_current_weather(location, user_id)
         return {"status": "success", "data": data}, 200
 
 
 class ForecastWithDate(Resource):
+    @jwt_required()
     def get(self):
         # First, try to get parameters from the query string.
         location = request.args.get("location")
@@ -26,8 +35,12 @@ class ForecastWithDate(Resource):
         if not location or not start_date:
             json_data = request.get_json(silent=True)
             if json_data:
-                location = json_data.get("location")
-                start_date = json_data.get("start_date")
+                location = json_data.get("location", location)
+                start_date = json_data.get("start_date", start_date)
+
+        # Get the logged-in user ID
+        user_id = get_jwt_identity()
+        location = get_default_location(user_id, location)  # Use default if not provided
 
         # If still missing, return an error.
         if not location or not start_date:
@@ -38,13 +51,18 @@ class ForecastWithDate(Resource):
 
 
 class RealTimeWeather(Resource):
+    @jwt_required()
     def get(self):
-        # Retrieve location from the JSON body (not the query string)
+        # Retrieve location from JSON body if provided
         json_data = request.get_json(silent=True)
         location = json_data.get("location") if json_data else None
 
+        # Get the logged-in user ID
+        user_id = get_jwt_identity()
+        location = get_default_location(user_id, location)  # Use default if not provided
+
         if not location:
-            return {"error": "Missing required parameter: location (in JSON body)"}, 400
+            return {"error": "No location provided and no preferences found. Please update your location."}, 400
 
         @stream_with_context
         def event_stream():
@@ -56,12 +74,20 @@ class RealTimeWeather(Resource):
                 time.sleep(5)
 
         return Response(event_stream(), mimetype="text/event-stream")
+
 class Next7DaysForecast(Resource):
+    @jwt_required()
     def get(self):
         parser = reqparse.RequestParser()
-        parser.add_argument('location', type=str, required=True, help="Location is required")
+        parser.add_argument('location', type=str, required=False, help="Location is optional")
         args = parser.parse_args()
-        data = get_forecast(args['location'])
+
+        user_id = get_jwt_identity()
+        location = get_default_location(user_id, args.get("location"))
+        if not location:
+            return {"error": "No location provided and no preferences found. Please update your location."}, 400
+
+        data = get_forecast(location)
         return {"status": "success", "data": data}, 200
 
 
