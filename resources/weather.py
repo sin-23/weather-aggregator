@@ -92,9 +92,16 @@ class Next7DaysForecast(Resource):
 
 
 class DetailedForecast(Resource):
+    @jwt_required()  # NEW
     def get(self):
         parser = reqparse.RequestParser()
-        parser.add_argument('location', type=str, required=True, help="Location is required")
+        parser.add_argument('location', type=str, required=False, help="Location is optional")
         args = parser.parse_args()
-        data = get_detailed_forecast(args['location'])
+
+        user_id = get_jwt_identity()  # NEW
+        location = get_default_location(user_id, args.get("location"))
+        if not location:
+            return {"error": "No location provided and no preferences found. Please update your location."}, 400
+
+        data = get_detailed_forecast(location)
         return {"status": "success", "data": data}, 200

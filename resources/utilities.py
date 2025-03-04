@@ -3,6 +3,7 @@ from flask_restful import Resource, reqparse
 from services.external_api import get_historical_weather, submit_feedback
 import os
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from services.external_api import get_default_location
 
 class Config:
     DEBUG = True
@@ -13,13 +14,21 @@ class Config:
     # If you're still using Open-Meteo for other endpoints, keep its key if needed.
     OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', 'your_default_key')
 
+
 class HistoricalWeather(Resource):
+    @jwt_required()  # NEW
     def get(self):
         parser = reqparse.RequestParser()
-        parser.add_argument('location', type=str, required=True, help="Location is required")
+        parser.add_argument('location', type=str, required=False, help="Location is optional")
         parser.add_argument('date', type=str, required=True, help="Date (YYYY-MM-DD) is required")
         args = parser.parse_args()
-        data = get_historical_weather(args['location'], args['date'])
+
+        user_id = get_jwt_identity()  # NEW
+        location = get_default_location(user_id, args.get("location"))
+        if not location:
+            return {"error": "No location provided and no preferences found. Please update your location."}, 400
+
+        data = get_historical_weather(location, args['date'])
         return {"status": "success", "data": data}, 200
 
 class Feedback(Resource):
