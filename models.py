@@ -35,13 +35,18 @@ class UserPreference(db.Model):
     __tablename__ = "user_preferences"
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.String(100), unique=True, nullable=False)
-    preferences = db.Column(db.Text, nullable=False)  # Stored as JSON string
+    # Store only top searched locations as JSON (a list of strings)
+    top_searches = db.Column(db.JSON, nullable=True)
 
-    def set_preferences(self, pref_dict):
-        self.preferences = json.dumps(pref_dict)
+    def set_preferences(self, top_searches):
+        self.top_searches = top_searches  # expects a list of locations
 
     def get_preferences(self):
-        return json.loads(self.preferences)
+        # Return only the top_searches in a dictionary format
+        return {"top_searches": self.top_searches or []}
+
+    def __repr__(self):
+        return f"<UserPreference {self.user_id} top_searches:{self.top_searches}>"
 
 class UserSearchHistory(db.Model):
     __tablename__ = "user_search_history"
