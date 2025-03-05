@@ -39,10 +39,11 @@ class UserPreference(db.Model):
     top_searches = db.Column(db.JSON, nullable=True)
 
     def set_preferences(self, top_searches):
-        self.top_searches = top_searches  # expects a list of locations
+        """Stores a list of top searched locations."""
+        self.top_searches = top_searches  # expects a list of strings
 
     def get_preferences(self):
-        # Return only the top_searches in a dictionary format
+        """Returns a dictionary with only the top searched locations."""
         return {"top_searches": self.top_searches or []}
 
     def __repr__(self):

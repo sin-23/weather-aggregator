@@ -18,9 +18,9 @@ subscriptions = {}  # Maps (location, alert_type) or (location, condition) to su
 
 def log_user_search(user_id, location):
     """
-    Logs a search for a given location by a user.
-    If a record exists, increments the search_count and updates last_searched.
-    Otherwise, creates a new record.
+    Logs a user's search for a given location. If a record for that user and location exists,
+    increments the search_count and updates the last_searched timestamp. Otherwise, creates a new record.
+    Then updates the user's preferences with the top searched locations.
     """
     record = UserSearchHistory.query.filter_by(user_id=user_id, location=location).first()
     if record:
@@ -29,6 +29,31 @@ def log_user_search(user_id, location):
     else:
         record = UserSearchHistory(user_id=user_id, location=location, search_count=1)
         db.session.add(record)
+    db.session.commit()
+
+    # Update preferences based on the entire search history for this user.
+    update_user_preferences_from_history(user_id)
+
+
+def update_user_preferences_from_history(user_id):
+    """
+    Retrieves the user's search history from UserSearchHistory, orders the records by search_count descending,
+    takes the top 5 locations, and updates (or creates) the UserPreference record accordingly.
+    """
+    # Query the top 5 search history entries for the user, ordered by frequency.
+    search_history = UserSearchHistory.query.filter_by(user_id=user_id) \
+        .order_by(desc(UserSearchHistory.search_count)) \
+        .limit(5).all()
+    # Build a list of locations in descending order of frequency.
+    top_locations = [record.location for record in search_history]
+
+    # Update the UserPreference record.
+    user_pref = UserPreference.query.filter_by(user_id=user_id).first()
+    if user_pref:
+        user_pref.top_searches = top_locations
+    else:
+        user_pref = UserPreference(user_id=user_id, top_searches=top_locations)
+        db.session.add(user_pref)
     db.session.commit()
 
 def normalize(text):
