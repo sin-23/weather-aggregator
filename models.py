@@ -75,3 +75,13 @@ class Feedback(db.Model):
     user_id = db.Column(db.String(100), nullable=False)
     feedback = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class CustomSubscription(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)
+    location = db.Column(db.String(100), nullable=False)
+    alert_type = db.Column(db.Integer, nullable=False)
+    operator = db.Column(db.String(2), nullable=True)  # For temperature alerts
+    threshold = db.Column(db.String(20), nullable=True)  # Could be a numeric value or a string for precipitation
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
