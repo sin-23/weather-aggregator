@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_restful import Api
 from flask_jwt_extended import JWTManager
 from config import Config
@@ -12,6 +12,8 @@ from resources.comparisons import CompareWeather, ClimateData, TrendingWeather, 
 from resources.personalization import UserPreferences, SuggestedActivities, WeatherRecommendation, PredictionConfidence, UpdateLocation
 from resources.utilities import HistoricalWeather, Feedback
 from auth import UserRegistration, UserLogin, ProtectedResource
+
+from services.external_api import create_custom_alert
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -73,6 +75,21 @@ def not_found(error):
 @app.errorhandler(500)
 def internal_error(error):
     return jsonify({"status": "error", "message": "Internal Server Error"}), 500
+
+
+# @app.route('/api/custom-alert', methods=['POST'])
+# def api_create_alert():
+#     data = request.get_json()
+#     user_id = data.get("user_id")
+#     location = data.get("location")
+#     condition = data.get("condition")
+#     operator = data.get("operator")  # Expecting something like ">" or "<"
+#     threshold = data.get("threshold")
+#
+#     result = create_custom_alert(user_id, location, condition, operator, threshold)
+#     if result.startswith("Error:"):
+#         return jsonify({"status": "error", "message": result}), 400
+#     return jsonify({"status": "success", "message": result}), 201
 
 if __name__ == '__main__':
     app.run(debug=True)

@@ -6,7 +6,7 @@ import difflib
 from flask import Flask, request, jsonify
 from models import db, Subscription, UserPreference, UserLocation, Feedback, UserSearchHistory, CustomSubscription
 from bs4 import BeautifulSoup
-from flask_jwt_extended import get_jwt_identity
+from flask_jwt_extended import get_jwt_identity, jwt_required
 from collections import Counter
 from sqlalchemy import desc
 import json
@@ -914,31 +914,221 @@ def subscribe_to_alert(user_id, location, alert_type):
         return f"An error occurred: {str(e)}"
 
 
-def cancel_alert(user_id, location, alert_type):
+@jwt_required()
+def cancel_alert():
     """
-    Cancels a previously stored alert subscription.
-    If the alert type is invalid, returns a multi-line error message with acceptable values.
+    Cancels an alert subscription (normal or custom) for the logged-in user.
+
+    Expected JSON for normal alerts:
+    {
+      "subscription_type": "normal",
+      "location": "London",
+      "alert_type": "1"   // (as a string)
+    }
+
+    Expected JSON for custom alerts:
+    {
+      "subscription_type": "custom",
+      "location": "London",
+      "condition": "temperature",         // Must be 'temperature', 'wind_speed', or 'precipitation'
+      "operator": ">",                      // Required for temperature and wind_speed
+      "threshold": "35"                     // Numeric for temperature/wind_speed or category for precipitation
+    }
     """
-    try:
-        alert_type = int(alert_type)
-    except ValueError:
-        error_msg = "Invalid alert type. Acceptable values are:\n" + "\n".join(
-            [f"{k}: {v}" for k, v in ALERT_TYPES.items()])
-        return error_msg
+    data = request.get_json(force=True)
+    sub_type = data.get("subscription_type", "").lower().strip()
+    location = data.get("location")
+    if sub_type not in ["normal", "custom"]:
+        return jsonify({"status": "error", "message": "subscription_type must be 'normal' or 'custom'."}), 400
+    if not location:
+        return jsonify({"status": "error", "message": "Location is required."}), 400
 
-    if alert_type not in ALERT_TYPES:
-        error_msg = "Invalid alert type. Acceptable values are:\n" + "\n".join(
-            [f"{k}: {v}" for k, v in ALERT_TYPES.items()])
-        return error_msg
+    user_id = get_jwt_identity()
 
-    subscription = Subscription.query.filter_by(user_id=user_id, location=location, alert_type=alert_type).first()
-    if subscription:
-        db.session.delete(subscription)
+    if sub_type == "normal":
+        # For normal alerts, expect an alert_type parameter (as a string)
+        alert_type_str = data.get("alert_type")
+        if not alert_type_str:
+            return jsonify({"status": "error", "message": "For normal subscriptions, 'alert_type' is required."}), 400
+        try:
+            alert_type_int = int(alert_type_str)
+        except ValueError:
+            return jsonify({"status": "error", "message": "alert_type must be an integer."}), 400
+        subscription = Subscription.query.filter_by(
+            user_id=user_id,
+            location=location,
+            alert_type=alert_type_int
+        ).first()
+        if subscription:
+            db.session.delete(subscription)
+            db.session.commit()
+            return jsonify({"status": "success",
+                            "message": f"Cancelled normal alert type {alert_type_int} ({CUSTOM_ALERT_TYPE.get(alert_type_int, 'Unknown')}) for {location}."}), 200
+        else:
+            return jsonify({"status": "error",
+                            "message": f"No active normal subscription for alert type {alert_type_int} ({CUSTOM_ALERT_TYPE.get(alert_type_int, 'Unknown')}) in {location}."}), 400
+
+    elif sub_type == "custom":
+        # For custom alerts, require condition plus the additional fields.
+        condition = data.get("condition")
+        if not condition:
+            return jsonify({"status": "error", "message": "For custom subscriptions, 'condition' is required."}), 400
+        cond_lower = condition.lower().strip()
+        mapping = {
+            "temperature": ALERT_TYPE_TEMP,
+            "wind_speed": ALERT_TYPE_WIND,
+            "precipitation": ALERT_TYPE_PRECIP
+        }
+        alert_type = mapping.get(cond_lower)
+        if alert_type is None:
+            return jsonify({"status": "error",
+                            "message": "Condition must be 'temperature', 'wind_speed', or 'precipitation'."}), 400
+
+        # For temperature and wind_speed, require operator and threshold.
+        if alert_type in (ALERT_TYPE_TEMP, ALERT_TYPE_WIND):
+            operator = data.get("operator")
+            threshold = data.get("threshold")
+            if not operator or operator.strip() not in (">", "<"):
+                return jsonify({"status": "error",
+                                "message": "For custom temperature and wind_speed alerts, 'operator' is required and must be '>' or '<'."}), 400
+            operator = operator.strip()
+            if threshold is None:
+                return jsonify({"status": "error",
+                                "message": "For custom temperature and wind_speed alerts, 'threshold' is required."}), 400
+            try:
+                float(threshold)
+            except ValueError:
+                return jsonify({"status": "error",
+                                "message": "For custom temperature and wind_speed alerts, 'threshold' must be numeric."}), 400
+        elif alert_type == ALERT_TYPE_PRECIP:
+            threshold = data.get("threshold")
+            valid_levels = ["no rain", "light", "moderate", "heavy"]
+            if not threshold or threshold.lower().strip() not in valid_levels:
+                return jsonify({"status": "error",
+                                "message": "For custom precipitation alerts, 'threshold' must be one of: no rain, light, moderate, heavy."}), 400
+            operator = None
+            threshold = threshold.lower().strip()
+
+        subscription = CustomSubscription.query.filter_by(
+            user_id=user_id,
+            location=location,
+            alert_type=alert_type,
+            operator=operator,
+            threshold=str(threshold)
+        ).first()
+        if subscription:
+            return jsonify({"status": "error",
+                            "message": f"A subscription for this custom alert already exists at {location}."}), 400
+        custom_sub = CustomSubscription(
+            user_id=user_id,
+            location=location,
+            alert_type=alert_type,
+            operator=operator,
+            threshold=str(threshold)
+        )
+        db.session.add(custom_sub)
         db.session.commit()
-        return f"Cancelled alert type {alert_type} ({ALERT_TYPES[alert_type]}) for {location} for user {user_id}."
-    else:
-        return f"No active subscription for alert type {alert_type} ({ALERT_TYPES[alert_type]}) in {location} for user {user_id}."
+        return jsonify({"status": "success",
+                        "message": f"Cancelled custom alert for {CUSTOM_ALERT_TYPE.get(alert_type, 'Unknown')} at {location} cancelled."}), 200
 
+# Define alert type constants.
+ALERT_TYPE_TEMP = 1
+ALERT_TYPE_WIND = 2
+ALERT_TYPE_PRECIP = 3
+
+# New dictionary for alert type descriptions.
+CUSTOM_ALERT_TYPE = {
+    ALERT_TYPE_TEMP: "Temperature",
+    ALERT_TYPE_WIND: "Wind Speed",
+    ALERT_TYPE_PRECIP: "Precipitation Alert"
+}
+
+
+def create_custom_alert(user_id, location, condition, operator=None, threshold=None):
+    """
+    Creates a custom alert subscription for the logged-in user.
+    Returns a tuple: (success: bool, message: str)
+
+    Expected input parameters (all as strings):
+
+    For temperature alerts:
+      - condition: "temperature"
+      - operator: must be ">" or "<"
+      - threshold: numeric value (e.g., "35")
+      Example JSON:
+      { "location": "London", "condition": "temperature", "operator": ">", "threshold": "35" }
+
+    For wind speed alerts:
+      - condition: "wind_speed"
+      - operator: must be ">" or "<"
+      - threshold: numeric value (e.g., "40")
+      Example JSON:
+      { "location": "London", "condition": "wind_speed", "operator": ">", "threshold": "40" }
+
+    For precipitation alerts:
+      - condition: "precipitation"
+      - threshold: one of "no rain", "light", "moderate", or "heavy"
+      (operator is not used)
+      Example JSON:
+      { "location": "London", "condition": "precipitation", "threshold": "moderate" }
+    """
+    # Map the condition string to an internal numeric alert type.
+    condition_lower = condition.lower().strip() if condition else ""
+    mapping = {
+        "temperature": ALERT_TYPE_TEMP,
+        "wind_speed": ALERT_TYPE_WIND,
+        "precipitation": ALERT_TYPE_PRECIP
+    }
+    alert_type = mapping.get(condition_lower)
+    if alert_type is None:
+        return False, "Condition must be 'temperature', 'wind_speed', or 'precipitation'."
+
+    # Process based on alert type.
+    if alert_type in (ALERT_TYPE_TEMP, ALERT_TYPE_WIND):
+        # Require an operator.
+        if not operator or operator.strip() not in (">", "<"):
+            return False, "Temperature and wind speed alerts require an operator ('>' or '<')."
+        operator = operator.strip()
+        # Validate that threshold is numeric.
+        if threshold is None:
+            return False, "Threshold must be provided for temperature and wind speed alerts."
+        try:
+            float(threshold)
+        except (ValueError, TypeError):
+            return False, "Threshold must be a numeric value for temperature and wind speed alerts."
+    elif alert_type == ALERT_TYPE_PRECIP:
+        valid_categories = ['no rain', 'light', 'moderate', 'heavy']
+        if not threshold or threshold.lower().strip() not in valid_categories:
+            return False, "Precipitation threshold must be 'no rain', 'light', 'moderate', or 'heavy'."
+        operator = None  # Not used for precipitation.
+        threshold = threshold.lower().strip()
+
+    # Check if an identical custom alert already exists.
+    existing = CustomSubscription.query.filter_by(
+        user_id=user_id,
+        location=location,
+        alert_type=alert_type,
+        operator=operator,
+        threshold=str(threshold)
+    ).first()
+    if existing:
+        return False, f"A subscription for this alert already exists at {location}."
+
+    # Create and store the subscription.
+    subscription = CustomSubscription(
+        user_id=user_id,
+        location=location,
+        alert_type=alert_type,
+        operator=operator,
+        threshold=str(threshold)
+    )
+    db.session.add(subscription)
+    try:
+        db.session.commit()
+        return True, f"Custom alert for {CUSTOM_ALERT_TYPE.get(alert_type, 'Unknown')} at {location} created."
+    except Exception as e:
+        db.session.rollback()
+        return False, f"An error occurred: {str(e)}"
 
 def get_custom_alert_description(alert_json):
     """
@@ -953,10 +1143,10 @@ def get_custom_alert_description(alert_json):
     if category == 1:
         operator = alert_data.get("operator", "?")
         threshold = alert_data.get("threshold", "?")
-        return f"Temperature alert: {operator} {threshold}°C"
+        return f"Temperature {operator} {threshold}°C"
     elif category == 2:
         threshold = alert_data.get("threshold", "?")
-        return f"Wind speed alert: > {threshold} km/h"
+        return f"Wind speed > {threshold} km/h"
     elif category == 3:
         precip_mapping = {0: "No rain", 1: "Light rain", 2: "Moderate rain", 3: "Heavy rain"}
         condition = alert_data.get("precip_condition")
@@ -964,61 +1154,6 @@ def get_custom_alert_description(alert_json):
         return f"Precipitation alert: {description}"
     else:
         return "Unknown custom alert"
-
-
-# Define your alert type constants.
-ALERT_TYPE_TEMP = 1
-ALERT_TYPE_WIND = 2
-ALERT_TYPE_PRECIP = 3
-
-# Map incoming condition strings to the alert type constants.
-ALERT_TYPE_MAPPING = {
-    "temperature": ALERT_TYPE_TEMP,
-    "wind": ALERT_TYPE_WIND,  # or "windspeed" if that’s what you'll receive
-    "precipitation": ALERT_TYPE_PRECIP,
-}
-
-
-
-def create_custom_alert(user_id, location, alert_type, operator=None, threshold=None):
-    """
-    Creates a custom weather alert subscription.
-
-    For temperature alerts, operator must be '>' or '<' and threshold a numeric value.
-    For wind speed alerts, threshold is a numeric value (operator is assumed to be '>').
-    For precipitation alerts, threshold can be a category like 'no rain', 'light', etc.
-    """
-    # Validate input based on alert type.
-    if alert_type == ALERT_TYPE_TEMP:
-        if operator not in ('>', '<'):
-            return "Error: Temperature alerts require an operator of '>' or '<'."
-        try:
-            float(threshold)
-        except ValueError:
-            return "Error: Temperature threshold must be a numeric value."
-
-    elif alert_type == ALERT_TYPE_WIND:
-        try:
-            float(threshold)
-        except ValueError:
-            return "Error: Wind speed threshold must be a numeric value."
-
-    elif alert_type == ALERT_TYPE_PRECIP:
-        if threshold not in ['no rain', 'light', 'moderate', 'heavy']:
-            return "Error: Precipitation threshold must be one of: 'no rain', 'light', 'moderate', 'heavy'."
-
-    subscription = CustomSubscription(
-        user_id=user_id,
-        location=location,
-        alert_type=alert_type,
-        operator=operator,
-        threshold=str(threshold)  # storing as string for consistency
-    )
-
-    db.session.add(subscription)
-    db.session.commit()
-
-    return f"Custom alert for {ALERT_TYPES.get(alert_type, 'Unknown')} at {location} created."
 
 
 def save_user_preferences(user_id, preferences):
@@ -1037,44 +1172,55 @@ def save_user_preferences(user_id, preferences):
     return f"Preferences for user {user_id} saved."
 
 
+
 def get_user_preferences(user_id):
     """
-    Retrieves the user's top searched locations and active alert subscriptions.
-    Active subscriptions include the location and alert type (with a human-readable description).
-    For custom alerts stored as JSON, the description is built using get_custom_alert_description.
+    Retrieves the user's top searched locations and active subscriptions.
+    Active subscriptions include normal subscriptions and custom alerts.
+    For custom alerts, a human-readable description is generated.
     """
-    # Retrieve the search history for top searches.
+    # Retrieve top searched locations.
     search_history = UserSearchHistory.query.filter_by(user_id=user_id)\
                       .order_by(desc(UserSearchHistory.search_count)).limit(5).all()
     top_locations = [record.location for record in search_history]
 
-    # Retrieve active alert subscriptions for the user.
-    subscriptions = Subscription.query.filter_by(user_id=user_id).all()
-    subs = []
-    for sub in subscriptions:
-        # Attempt to parse the alert_type as JSON for custom alerts.
+    subscriptions = []
+
+    # Normal subscriptions from Subscription table.
+    normal_subs = Subscription.query.filter_by(user_id=user_id).all()
+    for sub in normal_subs:
         try:
-            alert_data = json.loads(sub.alert_type)
-            description = get_custom_alert_description(sub.alert_type)
-            alert_value = sub.alert_type  # Storing the JSON string for custom alerts.
-        except Exception:
-            # If parsing fails, treat it as a predefined alert type.
-            try:
-                alert_num = int(sub.alert_type)
-            except Exception:
-                alert_num = sub.alert_type
+            alert_num = int(sub.alert_type)
             description = ALERT_TYPES.get(alert_num, "Unknown alert")
-            alert_value = alert_num
-        subs.append({
+        except Exception:
+            description = "Unknown alert"
+        subscriptions.append({
             "location": sub.location,
-            "alert_type": alert_value,
+            "alert_type": sub.alert_type,
+            "description": description
+        })
+
+    # Custom subscriptions from CustomSubscription table.
+    custom_subs = CustomSubscription.query.filter_by(user_id=user_id).all()
+    for sub in custom_subs:
+        if sub.alert_type == ALERT_TYPE_TEMP:
+            description = f"Temperature alert: {sub.operator} {sub.threshold}°C"
+        elif sub.alert_type == ALERT_TYPE_WIND:
+            description = f"Wind speed alert: > {sub.threshold} km/h"
+        elif sub.alert_type == ALERT_TYPE_PRECIP:
+            description = f"Precipitation alert: {sub.threshold}"
+        else:
+            description = "Unknown custom alert"
+        subscriptions.append({
+            "location": sub.location,
+            "alert_type": f"{sub.alert_type} (custom)",
             "description": description
         })
 
     return {
         "user_id": user_id,
         "top_searches": top_locations,
-        "subscriptions": subs
+        "subscriptions": subscriptions
     }
 
 def get_default_location(user_id, provided_location=None):

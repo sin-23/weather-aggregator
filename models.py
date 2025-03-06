@@ -82,6 +82,6 @@ class CustomSubscription(db.Model):
     user_id = db.Column(db.Integer, nullable=False)
     location = db.Column(db.String(100), nullable=False)
     alert_type = db.Column(db.Integer, nullable=False)
-    operator = db.Column(db.String(2), nullable=True)  # For temperature alerts
-    threshold = db.Column(db.String(20), nullable=True)  # Could be a numeric value or a string for precipitation
+    operator = db.Column(db.String(2), nullable=True)  # For temperature and wind alerts
+    threshold = db.Column(db.String(20), nullable=True)  # Numeric threshold or precipitation level
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
