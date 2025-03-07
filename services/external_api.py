@@ -875,43 +875,45 @@ def subscribe_to_alert(user_id, location, alert_type):
     Persists a subscription for weather alerts.
 
     Acceptable alert types are:
-      1: Extreme heat warning (Temperature >35°C)
-      2: High temperature warning (Temperature >30°C)
-      3: Low temperature warning (Temperature <5°C)
-      4: Extreme low temperature warning (Temperature <15°C)
-      5: Strong winds warning (Wind speed >40 km/h)
-      6: Extreme winds warning (Wind speed >60 km/h)
-      7: Heavy rain and thunderstorms expected (if heavy rain)
-      8: Rain and possible thunderstorms detected (if moderate rain)
+      1: Extreme heat warning (Temperature >35°C),
+      2: High temperature warning (Temperature >30°C),
+      3: Low temperature warning (Temperature <5°C),
+      4: Extreme low temperature warning (Temperature <15°C),
+      5: Strong winds warning (Wind speed >40 km/h),
+      6: Extreme winds warning (Wind speed >60 km/h),
+      7: Rain and possible thunderstorms detected (if moderate rain),
+      8: Heavy rain and thunderstorms detected (if heavy rain).
 
-    If an invalid alert_type is provided, returns a multi-line error message listing acceptable values.
+    Returns a tuple: (success: bool, message: str).
     """
+    if not alert_type:
+        return (
+        False, "Invalid alert type. Acceptable values are: " + ", ".join([f"{k}: {v}" for k, v in ALERT_TYPES.items()]))
     try:
         alert_type = int(alert_type)
     except ValueError:
-        error_msg = "Invalid alert type. Acceptable values are:\n" + "\n".join(
-            [f"{k}: {v}" for k, v in ALERT_TYPES.items()])
-        return error_msg
-
+        return (
+        False, "Invalid alert type. Acceptable values are: " + ", ".join([f"{k}: {v}" for k, v in ALERT_TYPES.items()]))
     if alert_type not in ALERT_TYPES:
-        error_msg = "Invalid alert type. Acceptable values are:\n" + "\n".join(
-            [f"{k}: {v}" for k, v in ALERT_TYPES.items()])
-        return error_msg
+        return (
+        False, "Invalid alert type. Acceptable values are: " + ", ".join([f"{k}: {v}" for k, v in ALERT_TYPES.items()]))
 
     # Check if the subscription already exists.
     existing = Subscription.query.filter_by(user_id=user_id, location=location, alert_type=alert_type).first()
     if existing:
-        return f"User {user_id} is already subscribed to alert type {alert_type} ({ALERT_TYPES[alert_type]}) for {location}."
+        return (False,
+                f"User {user_id} is already subscribed to alert type {alert_type} ({ALERT_TYPES[alert_type]}) for {location}.")
 
-    # Otherwise, create and store the new subscription.
+    # Create and store the new subscription.
     subscription = Subscription(user_id=user_id, location=location, alert_type=alert_type)
     db.session.add(subscription)
     try:
         db.session.commit()
-        return f"User {user_id} subscribed to alert type {alert_type} ({ALERT_TYPES[alert_type]}) for {location}."
+        return (
+        True, f"User {user_id} subscribed to alert type {alert_type} ({ALERT_TYPES[alert_type]}) for {location}.")
     except Exception as e:
         db.session.rollback()
-        return f"An error occurred: {str(e)}"
+        return (False, f"An error occurred: {str(e)}")
 
 
 @jwt_required()
@@ -1043,7 +1045,6 @@ CUSTOM_ALERT_TYPE = {
     ALERT_TYPE_PRECIP: "Precipitation Alert"
 }
 
-
 def create_custom_alert(user_id, location, condition, operator=None, threshold=None):
     """
     Creates a custom alert subscription for the logged-in user.
@@ -1067,7 +1068,8 @@ def create_custom_alert(user_id, location, condition, operator=None, threshold=N
 
     For precipitation alerts:
       - condition: "precipitation"
-      - threshold: one of "no rain", "light", "moderate", or "heavy"
+      - threshold: one of the following (case-insensitive):
+            "no rain", "clear", "cloud", "clouds", "cloudy", "sunny", "light", "moderate", or "heavy"
       (operator is not used)
       Example JSON:
       { "location": "London", "condition": "precipitation", "threshold": "moderate" }
@@ -1097,11 +1099,22 @@ def create_custom_alert(user_id, location, condition, operator=None, threshold=N
         except (ValueError, TypeError):
             return False, "Threshold must be a numeric value for temperature and wind speed alerts."
     elif alert_type == ALERT_TYPE_PRECIP:
-        valid_categories = ['no rain', 'light', 'moderate', 'heavy']
-        if not threshold or threshold.lower().strip() not in valid_categories:
-            return False, "Precipitation threshold must be 'no rain', 'light', 'moderate', or 'heavy'."
+        # Use a dictionary to map various precipitation synonyms.
+        valid_mapping = {
+            "no rain": "no rain",
+            "clear": "no rain",
+            "cloud": "no rain",
+            "clouds": "no rain",
+            "cloudy": "no rain",
+            "sunny": "no rain",
+            "light": "light",
+            "moderate": "moderate",
+            "heavy": "heavy"
+        }
+        if not threshold or threshold.lower().strip() not in valid_mapping:
+            return False, ("Precipitation threshold must be one of: no rain, clear, cloud, clouds, cloudy, sunny, light, moderate, or heavy.")
         operator = None  # Not used for precipitation.
-        threshold = threshold.lower().strip()
+        threshold = valid_mapping[threshold.lower().strip()]
 
     # Check if an identical custom alert already exists.
     existing = CustomSubscription.query.filter_by(
@@ -1129,6 +1142,8 @@ def create_custom_alert(user_id, location, condition, operator=None, threshold=N
     except Exception as e:
         db.session.rollback()
         return False, f"An error occurred: {str(e)}"
+
+
 
 def get_custom_alert_description(alert_json):
     """
@@ -1204,9 +1219,9 @@ def get_user_preferences(user_id):
     custom_subs = CustomSubscription.query.filter_by(user_id=user_id).all()
     for sub in custom_subs:
         if sub.alert_type == ALERT_TYPE_TEMP:
-            description = f"Temperature alert: {sub.operator} {sub.threshold}°C"
+            description = f"Temperature {sub.operator} {sub.threshold}°C"
         elif sub.alert_type == ALERT_TYPE_WIND:
-            description = f"Wind speed alert: > {sub.threshold} km/h"
+            description = f"Wind speed {sub.operator} {sub.threshold} km/h"
         elif sub.alert_type == ALERT_TYPE_PRECIP:
             description = f"Precipitation alert: {sub.threshold}"
         else:
@@ -1258,3 +1273,145 @@ def submit_feedback(user_id, feedback):
     db.session.add(fb)
     db.session.commit()
     return f"Feedback from user {user_id} recorded."
+
+
+def map_precipitation_category(description):
+    """
+    Maps the weather description (from get_current_weather) to one of:
+      "no rain", "light", "moderate", or "heavy".
+
+    Mapping is based on keywords in the description:
+      - "no rain": if the description contains any of:
+          "clear sky", "mainly clear", "partly cloudy", "overcast", "fog", "depositing rime fog"
+      - "light": if it contains any of:
+          "light drizzle", "light freezing drizzle", "slight rain", "slight rain showers", "slight snow fall", "slight snow showers", "snow grains"
+      - "moderate": if it contains any of:
+          "moderate drizzle", "moderate rain", "moderate rain showers", "moderate snow fall", "moderate snow showers", "slight or moderate thunderstorm", "thunderstorm with slight hail"
+      - "heavy": if it contains any of:
+          "dense drizzle", "dense freezing drizzle", "heavy rain", "heavy freezing rain", "heavy snow fall", "heavy rain showers", "heavy snow showers", "thunderstorm with heavy hail"
+
+    If no keywords match, returns "unknown".
+    """
+    desc = description.lower() if description else ""
+
+    no_rain_keywords = [
+        "clear sky", "mainly clear", "partly cloudy", "overcast", "fog", "depositing rime fog"
+    ]
+    for word in no_rain_keywords:
+        if word in desc:
+            return "no rain"
+
+    light_keywords = [
+        "light drizzle", "light freezing drizzle", "slight rain",
+        "slight rain showers", "slight snow fall", "slight snow showers", "snow grains"
+    ]
+    for word in light_keywords:
+        if word in desc:
+            return "light"
+
+    moderate_keywords = [
+        "moderate drizzle", "moderate rain", "moderate rain showers",
+        "moderate snow fall", "moderate snow showers", "slight or moderate thunderstorm",
+        "thunderstorm with slight hail"
+    ]
+    for word in moderate_keywords:
+        if word in desc:
+            return "moderate"
+
+    heavy_keywords = [
+        "dense drizzle", "dense freezing drizzle", "heavy rain",
+        "heavy freezing rain", "heavy snow fall", "heavy rain showers",
+        "heavy snow showers", "thunderstorm with heavy hail"
+    ]
+    for word in heavy_keywords:
+        if word in desc:
+            return "heavy"
+
+    return "unknown"
+
+
+def evaluate_normal_alert(subscription, weather):
+    """
+    Evaluates a normal alert subscription based on current weather data.
+    Uses fixed thresholds from ALERT_TYPES.
+    """
+    cw = weather.get("current_weather", {})
+    if not cw:
+        return None
+
+    temp = cw.get("temperature_celsius")
+    wind = cw.get("wind_speed_kph")
+    desc = cw.get("weather_description", "").lower()
+    alert_type = subscription.alert_type
+
+    if alert_type == "1":  # Extreme heat warning: Temperature >35°C
+        if temp is not None and temp > 35:
+            return f"Alert: Temperature at {subscription.location} is {temp}°C, exceeding 35°C."
+    elif alert_type == "2":  # High temperature warning: Temperature >30°C
+        if temp is not None and temp > 30:
+            return f"Alert: Temperature at {subscription.location} is {temp}°C, exceeding 30°C."
+    elif alert_type == "3":  # Low temperature warning: Temperature <5°C
+        if temp is not None and temp < 5:
+            return f"Alert: Temperature at {subscription.location} is {temp}°C, below 5°C."
+    elif alert_type == "4":  # Extreme low temperature warning: Temperature <15°C
+        if temp is not None and temp < 15:
+            return f"Alert: Temperature at {subscription.location} is {temp}°C, below 15°C."
+    elif alert_type == "5":  # Strong winds warning: Wind speed >40 km/h
+        if wind is not None and wind > 40:
+            return f"Alert: Wind speed at {subscription.location} is {wind} km/h, exceeding 40 km/h."
+    elif alert_type == "6":  # Extreme winds warning: Wind speed >60 km/h
+        if wind is not None and wind > 60:
+            return f"Alert: Wind speed at {subscription.location} is {wind} km/h, exceeding 60 km/h."
+    elif alert_type == "7":  # Moderate rain alert: mapped precipitation category equals "moderate"
+        current_category = map_precipitation_category(cw.get("weather_description", ""))
+        if current_category == "moderate":
+            return f"Alert: Precipitation at {subscription.location} is moderate."
+    elif alert_type == "8":  # Heavy rain alert: mapped precipitation category equals "heavy"
+        current_category = map_precipitation_category(cw.get("weather_description", ""))
+        if current_category == "heavy":
+            return f"Alert: Heavy rain detected at {subscription.location}."
+    return None
+
+def evaluate_custom_alert(subscription, weather):
+    """
+    Evaluates a custom alert subscription using current weather data.
+    For temperature and wind_speed custom alerts, compares the current value
+    against the stored threshold using the stored operator.
+    For precipitation custom alerts, maps the weather description to a category
+    and triggers an alert if the current category matches the subscribed category.
+    """
+    cw = weather.get("current_weather", {})
+    if not cw:
+        return None
+
+    if subscription.alert_type == ALERT_TYPE_TEMP:
+        try:
+            thresh = float(subscription.threshold)
+        except:
+            return None
+        temp = cw.get("temperature_celsius")
+        if temp is None:
+            return None
+        if subscription.operator == ">" and temp > thresh:
+            return f"Temperature at {subscription.location} is {temp}°C, exceeding {subscription.threshold}°C."
+        elif subscription.operator == "<" and temp < thresh:
+            return f"Temperature at {subscription.location} is {temp}°C, below {subscription.threshold}°C."
+    elif subscription.alert_type == ALERT_TYPE_WIND:
+        try:
+            thresh = float(subscription.threshold)
+        except:
+            return None
+        wind = cw.get("wind_speed_kph")
+        if wind is None:
+            return None
+        if subscription.operator == ">" and wind > thresh:
+            return f"Wind speed at {subscription.location} is {wind} km/h, exceeding {subscription.threshold} km/h."
+        elif subscription.operator == "<" and wind < thresh:
+            return f"Wind speed at {subscription.location} is {wind} km/h, below {subscription.threshold} km/h."
+    elif subscription.alert_type == ALERT_TYPE_PRECIP:
+        current_category = map_precipitation_category(cw.get("weather_description", ""))
+        subscribed_category = subscription.threshold.lower().strip()
+        # Trigger an alert if the current category matches the subscription threshold.
+        if current_category == subscribed_category:
+            return f"Precipitation at {subscription.location} is '{current_category}'."
+    return None

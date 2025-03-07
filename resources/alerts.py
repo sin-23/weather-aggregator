@@ -30,8 +30,11 @@ class SubscribeAlert(Resource):
         parser.add_argument('location', type=str, required=True, help="Location is required")
         parser.add_argument('alert_type', type=str, required=True, help="Alert type is required")
         args = parser.parse_args()
-        result = subscribe_to_alert(user_id, args['location'], args['alert_type'])
-        return {"status": "success", "message": result}, 201
+        success, message = subscribe_to_alert(user_id, args['location'], args['alert_type'])
+        if not success:
+            return {"status": "error", "message": message}, 400
+        return {"status": "success", "message": message}, 201
+
 
 class CancelAlert(Resource):
     @jwt_required()
