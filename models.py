@@ -70,12 +70,12 @@ class UserLocation(db.Model):
 
 
 class Feedback(db.Model):
-    __tablename__ = "feedback"
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.String(100), nullable=False)
-    feedback = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
+   __tablename__ = "feedback"
+   id = db.Column(db.Integer, primary_key=True)
+   user_id = db.Column(db.String(100), nullable=False)
+   rating = db.Column(db.Integer, nullable=False)  # rating between 1 and 5
+   comment = db.Column(db.Text, nullable=True)     # optional comment
+   created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class CustomSubscription(db.Model):
     id = db.Column(db.Integer, primary_key=True)

@@ -10,7 +10,7 @@ from resources.weather import CurrentWeather, ForecastWithDate, RealTimeWeather,
 from resources.alerts import WeatherAlerts, SubscribeAlert, CancelAlert, CustomAlert
 from resources.comparisons import CompareWeather, ClimateData, TrendingWeather, SeasonalChanges
 from resources.personalization import UserPreferences, SuggestedActivities, WeatherRecommendation, PredictionConfidence, UpdateLocation
-from resources.utilities import HistoricalWeather, Feedback
+from resources.utilities import HistoricalWeather, FeedbackResource, AverageRatingResource
 from auth import UserRegistration, UserLogin, ProtectedResource
 
 from services.external_api import create_custom_alert
@@ -22,9 +22,9 @@ api = Api(app)
 jwt = JWTManager(app)
 
 # Create the database tables if they don’t exist
-with app.app_context():
-#     # add lang to if uulitin database db.drop_all()   # This will remove all existing tables.
-     db.create_all() # This will create tables based on your current models.
+# with app.app_context():
+     # add lang to if uulitin database: db.drop_all()   # This will remove all existing tables.
+     # db.create_all() # This will create tables based on your current models.
 
 
 # Register Weather Endpoints
@@ -56,7 +56,8 @@ api.add_resource(UpdateLocation, '/weather/update-location')
 
 # Register Utility Endpoints
 api.add_resource(HistoricalWeather, '/weather/historical')
-api.add_resource(Feedback, '/weather/feedback')
+api.add_resource(FeedbackResource, '/weather/feedback')
+api.add_resource(AverageRatingResource, '/feedback/average')
 
 # Register authentication endpoints
 api.add_resource(UserRegistration, '/register')
