@@ -438,14 +438,18 @@ def get_climate_data(region):
         return {"error": str(e)}
 
 
-
 def get_trending_cities():
     """
-    Scrapes Wikipedia's "List of cities proper by population" page to dynamically obtain
-    a list of trending (largest) cities. Instead of using a fixed cell index, it loops
-    through the cells in each row and returns the first anchor whose text contains letters.
-    Returns the top 5 city names.
+    Scrapes Wikipedia's "Wikipedia:WikiProject_Cities/Popular_pages" page to obtain
+    a list of trending (largest) cities from the "Page title" column.
+    It reads the second cell of each row, skips any row containing "List of",
+    and returns the top 5 unique city names. If a candidate contains "new york" or is
+    one of the specified boroughs (Brooklyn, Manhattan, Queens, Bronx, Staten Island),
+    it is normalized to "new york" to avoid duplicate entries.
     """
+    from bs4 import BeautifulSoup
+    import requests
+
     url = "https://en.wikipedia.org/wiki/Wikipedia:WikiProject_Cities/Popular_pages"
     try:
         response = requests.get(url, timeout=10)
@@ -453,24 +457,35 @@ def get_trending_cities():
         soup = BeautifulSoup(response.text, "html.parser")
         table = soup.find("table", class_="wikitable")
         trending = []
-        rows = table.find_all("tr")[1:6]  # Skip header; get top 5 rows
+        seen = set()
+        rows = table.find_all("tr")[1:]  # Skip header row.
         for row in rows:
+            if len(trending) >= 5:
+                break
             cells = row.find_all("td")
-            city = None
-            # Loop through each cell to find an anchor tag with alphabetic text.
-            for cell in cells:
-                anchor = cell.find("a")
-                if anchor:
-                    text = anchor.get_text(strip=True)
-                    if any(char.isalpha() for char in text):
-                        city = text
-                        break
-            if city:
-                trending.append(city)
+            if len(cells) < 2:
+                continue
+            candidate = cells[1].get_text(strip=True)
+            if "List of" in candidate:
+                continue
+
+            # Normalize candidate text.
+            normalized_candidate = candidate.lower().strip()
+
+            # Custom normalization: treat any candidate containing "new york" or being one of the boroughs as "new york"
+            if "new york" in normalized_candidate or normalized_candidate in ("brooklyn", "manhattan", "queens", "bronx", "staten island"):
+                normalized_candidate = "new york"
+
+            if normalized_candidate in seen:
+                continue
+
+            trending.append(candidate)
+            seen.add(normalized_candidate)
         return trending
     except Exception as e:
         print("Error scraping trending cities from Wikipedia:", e)
         return []
+
 
 def get_trending_weather():
     """
