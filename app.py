@@ -19,7 +19,7 @@ jwt = JWTManager(app)
 
 # Create the database tables if they don’t exist
 with app.app_context():
-     # add lang to if uulitin database: db.drop_all()   # This will remove all existing tables.
+     #db.drop_all()   # This will remove all existing tables.
     db.create_all() # This will create tables based on your current models.
 
 
