@@ -2,7 +2,6 @@
 from flask_restful import Resource, reqparse
 from flask import request
 from marshmallow import ValidationError
-from schemas.preferences_schema import preferences_schema
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from services.external_api import (
     save_user_preferences,

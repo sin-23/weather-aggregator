@@ -821,6 +821,11 @@ def get_detailed_forecast(location):
         response.raise_for_status()
         data = response.json()
 
+        # Process location data: remove 'localtime_epoch' if it exists.
+        location_data = data.get("location", {})
+        if "localtime_epoch" in location_data:
+            location_data.pop("localtime_epoch")
+
         # Gather hourly forecast data from all forecast days.
         forecast_days = data.get("forecast", {}).get("forecastday", [])
         hourly_data = []
@@ -845,7 +850,7 @@ def get_detailed_forecast(location):
             filtered_hourly.append(filtered_entry)
 
         return {
-            "location": data.get("location", {}),
+            "location": location_data,
             "hourly": filtered_hourly
         }
     except requests.exceptions.HTTPError as http_err:
@@ -855,7 +860,6 @@ def get_detailed_forecast(location):
             return {"error": str(http_err)}
     except Exception as e:
         return {"error": str(e)}
-
 
 # Define the acceptable alert types and their descriptions.
 ALERT_TYPES = {
