@@ -59,20 +59,5 @@ def not_found(error):
 def internal_error(error):
     return jsonify({"status": "error", "message": "Internal Server Error"}), 500
 
-
-# @app.route('/api/custom-alert', methods=['POST'])
-# def api_create_alert():
-#     data = request.get_json()
-#     user_id = data.get("user_id")
-#     location = data.get("location")
-#     condition = data.get("condition")
-#     operator = data.get("operator")  # Expecting something like ">" or "<"
-#     threshold = data.get("threshold")
-#
-#     result = create_custom_alert(user_id, location, condition, operator, threshold)
-#     if result.startswith("Error:"):
-#         return jsonify({"status": "error", "message": result}), 400
-#     return jsonify({"status": "success", "message": result}), 201
-
 if __name__ == '__main__':
     app.run(debug=True)
