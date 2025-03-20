@@ -55,8 +55,3 @@ class UserLogin(Resource):
 
         return {"status": "error", "message": "Invalid credentials."}, 401
 
-class ProtectedResource(Resource):
-    @jwt_required()
-    def get(self):
-        current_user = get_jwt_identity()
-        return {"status": "success", "message": f"Hello, {current_user}!"}, 200
