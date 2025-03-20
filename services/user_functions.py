@@ -136,25 +136,21 @@ def update_user_location(user_id, location):
     return f"User {user_id}'s location updated to {location}."
 
 def submit_feedback(user_id, rating, comment=""):
-   """
-   Stores user feedback (a rating between 1 and 5 and an optional comment) in the database.
-   Returns a tuple: (success: bool, message: str)
-   """
-   try:
-       rating = int(rating)
-   except ValueError:
-       return False, "Rating must be an integer."
-
-
-   if rating < 1 or rating > 5:
-       return False, "Rating must be between 1 and 5."
-
-
-   fb = Feedback(user_id=user_id, rating=rating, comment=comment)
-   db.session.add(fb)
-   try:
-       db.session.commit()
-       return True, f"Feedback from user {user_id} recorded."
-   except Exception as e:
-       db.session.rollback()
-       return False, f"An error occurred: {str(e)}"
+    """
+    Stores user feedback (a rating between 1 and 5 and an optional comment) in the database.
+    Returns a tuple: (success: bool, message: str)
+    """
+    try:
+        rating = int(rating)
+    except ValueError:
+        return False, "Rating must be an integer."
+    if rating < 1 or rating > 5:
+        return False, "Rating must be between 1 and 5."
+    fb = Feedback(user_id=user_id, rating=rating, comment=comment)
+    db.session.add(fb)
+    try:
+        db.session.commit()
+        return True, f"Feedback from user {user_id} recorded."
+    except Exception as e:
+        db.session.rollback()
+        return False, f"An error occurred: {str(e)}"

@@ -1,7 +1,6 @@
 from flask_restful import Resource, reqparse
 from services.alert_functions import get_weather_alerts, subscribe_to_alert, create_custom_alert, CUSTOM_ALERT_TYPE, ALERT_TYPE_TEMP, ALERT_TYPE_WIND, ALERT_TYPE_PRECIP
 from services.user_functions import get_default_location
-
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models import db, Subscription, CustomSubscription
 
