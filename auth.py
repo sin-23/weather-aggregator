@@ -2,7 +2,8 @@
 from flask_restful import Resource, reqparse
 from models import db, User, Subscription, CustomSubscription
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
-from services.external_api import get_current_weather, evaluate_normal_alert, evaluate_custom_alert
+from services.weather_functions import get_current_weather
+from services. alert_functions import evaluate_custom_alert, evaluate_normal_alert
 
 class UserRegistration(Resource):
     def post(self):

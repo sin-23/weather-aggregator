@@ -1,8 +1,7 @@
-# resources/alerts.py
-from flask import request
 from flask_restful import Resource, reqparse
-from services.external_api import get_weather_alerts, subscribe_to_alert, cancel_alert, create_custom_alert, \
-    get_default_location, CUSTOM_ALERT_TYPE, ALERT_TYPE_TEMP, ALERT_TYPE_WIND, ALERT_TYPE_PRECIP
+from services.alert_functions import get_weather_alerts, subscribe_to_alert, create_custom_alert, CUSTOM_ALERT_TYPE, ALERT_TYPE_TEMP, ALERT_TYPE_WIND, ALERT_TYPE_PRECIP
+from services.user_functions import get_default_location
+
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models import db, Subscription, CustomSubscription
 
@@ -34,7 +33,6 @@ class SubscribeAlert(Resource):
         if not success:
             return {"status": "error", "message": message}, 400
         return {"status": "success", "message": message}, 201
-
 
 class CancelAlert(Resource):
     @jwt_required()
@@ -125,7 +123,6 @@ class CancelAlert(Resource):
                 return {"status": "success", "message": f"Cancelled custom alert for {CUSTOM_ALERT_TYPE.get(alert_type, 'Unknown')} at {location}."}, 200
             else:
                 return {"status": "error", "message": f"No active custom subscription found for {cond_lower} alert at {location}."}, 400
-
 
 class CustomAlert(Resource):
     @jwt_required()

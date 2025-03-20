@@ -6,14 +6,10 @@ from config import Config
 from models import db  # Import SQLAlchemy object
 
 # Import resource classes from the resources package
-from resources.weather import CurrentWeather, ForecastWithDate, RealTimeWeather, Next7DaysForecast, DetailedForecast
+from resources.weather import CurrentWeather, ForecastWithDate, RealTimeWeather, Next7DaysForecast, DetailedForecast, CompareWeather, ClimateData, TrendingWeather, SeasonalChanges, SuggestedActivities, WeatherRecommendation, PredictionConfidence, HistoricalWeather
 from resources.alerts import WeatherAlerts, SubscribeAlert, CancelAlert, CustomAlert
-from resources.comparisons import CompareWeather, ClimateData, TrendingWeather, SeasonalChanges
-from resources.personalization import UserPreferences, SuggestedActivities, WeatherRecommendation, PredictionConfidence, UpdateLocation
-from resources.utilities import HistoricalWeather, FeedbackResource, AverageRatingResource
+from resources.utilities import  FeedbackResource, AverageRatingResource, UserPreferences, UpdateLocation
 from auth import UserRegistration, UserLogin, ProtectedResource
-
-from services.external_api import create_custom_alert
 
 app = Flask(__name__)
 app.config.from_object(Config)
