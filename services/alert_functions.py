@@ -2,7 +2,7 @@ from models import db, Subscription, CustomSubscription
 from flask import request, jsonify
 from flask_jwt_extended import get_jwt_identity
 import json
-from weather_functions import get_current_weather
+
 
 def get_weather_alerts(location):
     """
@@ -23,6 +23,7 @@ def get_weather_alerts(location):
               else: "Rain and possible thunderstorms detected"
       - If none of the above, it returns a general advisory.
     """
+    from services.weather_functions import get_current_weather
     # Get current weather data (which includes geocode details)
     current = get_current_weather(location)
     if not current or "error" in current:
@@ -79,6 +80,18 @@ ALERT_TYPES = {
 }
 
 
+# Define alert type constants.
+ALERT_TYPE_TEMP = 1
+ALERT_TYPE_WIND = 2
+ALERT_TYPE_PRECIP = 3
+
+# New dictionary for alert type descriptions.
+CUSTOM_ALERT_TYPE = {
+    ALERT_TYPE_TEMP: "Temperature",
+    ALERT_TYPE_WIND: "Wind Speed",
+    ALERT_TYPE_PRECIP: "Precipitation Alert"
+}
+
 def subscribe_to_alert(user_id, location, alert_type):
     """
     Persists a subscription for weather alerts.
@@ -123,134 +136,6 @@ def subscribe_to_alert(user_id, location, alert_type):
     except Exception as e:
         db.session.rollback()
         return (False, f"An error occurred: {str(e)}")
-
-def cancel_alert():
-    """
-    Cancels an alert subscription (normal or custom) for the logged-in user.
-
-    Expected JSON for normal alerts:
-    {
-      "subscription_type": "normal",
-      "location": "London",
-      "alert_type": "1"   // (as a string)
-    }
-
-    Expected JSON for custom alerts:
-    {
-      "subscription_type": "custom",
-      "location": "London",
-      "condition": "temperature",         // Must be 'temperature', 'wind_speed', or 'precipitation'
-      "operator": ">",                      // Required for temperature and wind_speed
-      "threshold": "35"                     // Numeric for temperature/wind_speed or category for precipitation
-    }
-    """
-    data = request.get_json(force=True)
-    sub_type = data.get("subscription_type", "").lower().strip()
-    location = data.get("location")
-    if sub_type not in ["normal", "custom"]:
-        return jsonify({"status": "error", "message": "subscription_type must be 'normal' or 'custom'."}), 400
-    if not location:
-        return jsonify({"status": "error", "message": "Location is required."}), 400
-
-    user_id = get_jwt_identity()
-
-    if sub_type == "normal":
-        # For normal alerts, expect an alert_type parameter (as a string)
-        alert_type_str = data.get("alert_type")
-        if not alert_type_str:
-            return jsonify({"status": "error", "message": "For normal subscriptions, 'alert_type' is required."}), 400
-        try:
-            alert_type_int = int(alert_type_str)
-        except ValueError:
-            return jsonify({"status": "error", "message": "alert_type must be an integer."}), 400
-        subscription = Subscription.query.filter_by(
-            user_id=user_id,
-            location=location,
-            alert_type=alert_type_int
-        ).first()
-        if subscription:
-            db.session.delete(subscription)
-            db.session.commit()
-            return jsonify({"status": "success",
-                            "message": f"Cancelled normal alert type {alert_type_int} ({CUSTOM_ALERT_TYPE.get(alert_type_int, 'Unknown')}) for {location}."}), 200
-        else:
-            return jsonify({"status": "error",
-                            "message": f"No active normal subscription for alert type {alert_type_int} ({CUSTOM_ALERT_TYPE.get(alert_type_int, 'Unknown')}) in {location}."}), 400
-
-    elif sub_type == "custom":
-        # For custom alerts, require condition plus the additional fields.
-        condition = data.get("condition")
-        if not condition:
-            return jsonify({"status": "error", "message": "For custom subscriptions, 'condition' is required."}), 400
-        cond_lower = condition.lower().strip()
-        mapping = {
-            "temperature": ALERT_TYPE_TEMP,
-            "wind_speed": ALERT_TYPE_WIND,
-            "precipitation": ALERT_TYPE_PRECIP
-        }
-        alert_type = mapping.get(cond_lower)
-        if alert_type is None:
-            return jsonify({"status": "error",
-                            "message": "Condition must be 'temperature', 'wind_speed', or 'precipitation'."}), 400
-
-        # For temperature and wind_speed, require operator and threshold.
-        if alert_type in (ALERT_TYPE_TEMP, ALERT_TYPE_WIND):
-            operator = data.get("operator")
-            threshold = data.get("threshold")
-            if not operator or operator.strip() not in (">", "<"):
-                return jsonify({"status": "error",
-                                "message": "For custom temperature and wind_speed alerts, 'operator' is required and must be '>' or '<'."}), 400
-            operator = operator.strip()
-            if threshold is None:
-                return jsonify({"status": "error",
-                                "message": "For custom temperature and wind_speed alerts, 'threshold' is required."}), 400
-            try:
-                float(threshold)
-            except ValueError:
-                return jsonify({"status": "error",
-                                "message": "For custom temperature and wind_speed alerts, 'threshold' must be numeric."}), 400
-        elif alert_type == ALERT_TYPE_PRECIP:
-            threshold = data.get("threshold")
-            valid_levels = ["no rain", "light", "moderate", "heavy"]
-            if not threshold or threshold.lower().strip() not in valid_levels:
-                return jsonify({"status": "error",
-                                "message": "For custom precipitation alerts, 'threshold' must be one of: no rain, light, moderate, heavy."}), 400
-            operator = None
-            threshold = threshold.lower().strip()
-
-        subscription = CustomSubscription.query.filter_by(
-            user_id=user_id,
-            location=location,
-            alert_type=alert_type,
-            operator=operator,
-            threshold=str(threshold)
-        ).first()
-        if subscription:
-            return jsonify({"status": "error",
-                            "message": f"A subscription for this custom alert already exists at {location}."}), 400
-        custom_sub = CustomSubscription(
-            user_id=user_id,
-            location=location,
-            alert_type=alert_type,
-            operator=operator,
-            threshold=str(threshold)
-        )
-        db.session.add(custom_sub)
-        db.session.commit()
-        return jsonify({"status": "success",
-                        "message": f"Cancelled custom alert for {CUSTOM_ALERT_TYPE.get(alert_type, 'Unknown')} at {location} cancelled."}), 200
-
-# Define alert type constants.
-ALERT_TYPE_TEMP = 1
-ALERT_TYPE_WIND = 2
-ALERT_TYPE_PRECIP = 3
-
-# New dictionary for alert type descriptions.
-CUSTOM_ALERT_TYPE = {
-    ALERT_TYPE_TEMP: "Temperature",
-    ALERT_TYPE_WIND: "Wind Speed",
-    ALERT_TYPE_PRECIP: "Precipitation Alert"
-}
 
 def create_custom_alert(user_id, location, condition, operator=None, threshold=None):
     """
@@ -350,7 +235,6 @@ def create_custom_alert(user_id, location, condition, operator=None, threshold=N
         db.session.rollback()
         return False, f"An error occurred: {str(e)}"
 
-
 def get_custom_alert_description(alert_json):
     """
     Converts a custom alert (stored as JSON) into a human-readable description.
@@ -429,7 +313,6 @@ def map_precipitation_category(description):
             return "heavy"
 
     return "unknown"
-
 
 def evaluate_normal_alert(subscription, weather):
     """
@@ -516,3 +399,150 @@ def evaluate_custom_alert(subscription, weather):
         if current_category == subscribed_category:
             return f"Precipitation at {subscription.location} is '{current_category}'."
     return None
+
+
+def cancel_alert():
+    """
+    Cancels an alert subscription (normal or custom) for the logged-in user.
+
+    Expected JSON for normal alerts:
+    {
+      "subscription_type": "normal",
+      "location": "London",
+      "alert_type": "1"   // as a string (values 1 to 8)
+    }
+
+    Expected JSON for custom alerts:
+    {
+      "subscription_type": "custom",
+      "location": "London",
+      "condition": "temperature",         // Must be 'temperature', 'wind_speed', or 'precipitation'
+      "operator": ">",                      // Required for temperature and wind_speed
+      "threshold": "35"                     // Numeric for temperature/wind_speed or category for precipitation
+    }
+    """
+    print("DEBUG: cancel_alert function called.", flush=True)
+    data = request.get_json(force=True)
+    print("DEBUG: Received JSON data:", data, flush=True)
+
+    sub_type = data.get("subscription_type", "").lower().strip()
+    location = data.get("location")
+
+    if sub_type not in ["normal", "custom"]:
+        print("DEBUG: Invalid subscription_type:", sub_type, flush=True)
+        return jsonify({"status": "error", "message": "subscription_type must be 'normal' or 'custom'."}), 400
+    if not location:
+        print("DEBUG: Missing location.", flush=True)
+        return jsonify({"status": "error", "message": "Location is required."}), 400
+
+    user_id = get_jwt_identity()
+    print("DEBUG: Retrieved user_id:", user_id, flush=True)
+
+    if sub_type == "normal":
+        alert_type_str = data.get("alert_type")
+        if not alert_type_str:
+            print("DEBUG: Missing alert_type in normal branch.", flush=True)
+            return jsonify({"status": "error", "message": "For normal subscriptions, 'alert_type' is required."}), 400
+
+        alert_type_str = alert_type_str.strip()
+        try:
+            alert_type_int = int(alert_type_str)
+        except ValueError:
+            print("DEBUG: alert_type conversion failed. Received:", alert_type_str, flush=True)
+            return jsonify({"status": "error", "message": "alert_type must be an integer."}), 400
+
+        print(f"DEBUG: Normal branch: alert_type_int = {alert_type_int} (input was '{alert_type_str}')", flush=True)
+
+        # Query using the string value since Subscription.alert_type is stored as a string.
+        subscription = Subscription.query.filter_by(
+            user_id=user_id,
+            location=location,
+            alert_type=alert_type_str
+        ).first()
+        print("DEBUG: Retrieved subscription from DB:", subscription, flush=True)
+
+        if subscription:
+            db.session.delete(subscription)
+            db.session.commit()
+            print("DEBUG: Subscription deleted.", flush=True)
+            return jsonify({
+                "status": "success",
+                "message": f"Cancelled normal alert type {alert_type_str} for {location}."
+            }), 200
+        else:
+            print("DEBUG: No matching normal subscription found.", flush=True)
+            return jsonify({
+                "status": "error",
+                "message": f"No active normal subscription for alert type {alert_type_str} in {location} for user {user_id}."
+            }), 400
+
+    elif sub_type == "custom":
+        condition = data.get("condition")
+        if not condition:
+            print("DEBUG: Missing condition for custom subscription.", flush=True)
+            return jsonify({"status": "error", "message": "For custom subscriptions, 'condition' is required."}), 400
+        cond_lower = condition.lower().strip()
+        mapping = {
+            "temperature": 1,  # ALERT_TYPE_TEMP
+            "wind_speed": 2,  # ALERT_TYPE_WIND
+            "precipitation": 3  # ALERT_TYPE_PRECIP
+        }
+        alert_type = mapping.get(cond_lower)
+        if alert_type is None:
+            print("DEBUG: Condition not recognized:", cond_lower, flush=True)
+            return jsonify({"status": "error",
+                            "message": "Condition must be 'temperature', 'wind_speed', or 'precipitation'."}), 400
+
+        if alert_type in (1, 2):
+            operator = data.get("operator")
+            threshold = data.get("threshold")
+            if not operator or operator.strip() not in (">", "<"):
+                print("DEBUG: Invalid operator for custom alert.", flush=True)
+                return jsonify({"status": "error",
+                                "message": "For custom temperature and wind_speed alerts, 'operator' is required and must be '>' or '<'."}), 400
+            operator = operator.strip()
+            if threshold is None:
+                print("DEBUG: Missing threshold for custom alert.", flush=True)
+                return jsonify({"status": "error",
+                                "message": "For custom temperature and wind_speed alerts, 'threshold' is required."}), 400
+            try:
+                float(threshold)
+            except ValueError:
+                print("DEBUG: Threshold conversion failed.", flush=True)
+                return jsonify({"status": "error",
+                                "message": "For custom temperature and wind_speed alerts, 'threshold' must be numeric."}), 400
+        elif alert_type == 3:
+            threshold = data.get("threshold")
+            valid_levels = ["no rain", "light", "moderate", "heavy"]
+            if not threshold or threshold.lower().strip() not in valid_levels:
+                print("DEBUG: Invalid precipitation threshold.", flush=True)
+                return jsonify({"status": "error",
+                                "message": "For custom precipitation alerts, 'threshold' must be one of: no rain, light, moderate, heavy."}), 400
+            operator = None
+            threshold = threshold.lower().strip()
+
+        subscription = CustomSubscription.query.filter_by(
+            user_id=user_id,
+            location=location,
+            alert_type=alert_type,
+            operator=operator,
+            threshold=str(threshold)
+        ).first()
+        print("DEBUG: Retrieved custom subscription from DB:", subscription, flush=True)
+        if subscription:
+            db.session.delete(subscription)
+            db.session.commit()
+            print("DEBUG: Custom subscription deleted.", flush=True)
+            return jsonify({
+                "status": "success",
+                "message": f"Cancelled custom alert for {['Temperature', 'Wind Speed', 'Precipitation Alert'][alert_type - 1]} at {location} for user {user_id}."
+            }), 200
+        else:
+            print("DEBUG: No matching custom subscription found.", flush=True)
+            return jsonify({
+                "status": "error",
+                "message": f"No active custom subscription for {['Temperature', 'Wind Speed', 'Precipitation Alert'][alert_type - 1]} at {location} for user {user_id}."
+            }), 400
+
+
+

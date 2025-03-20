@@ -3,7 +3,7 @@ import difflib
 from config import Config
 from models import UserLocation
 from datetime import timedelta, date
-from user_functions import log_user_search
+from services.user_functions import log_user_search
 
 def normalize(text):
     return text.strip().lower() if text else ""

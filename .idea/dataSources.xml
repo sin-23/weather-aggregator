@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="DataSourceManagerImpl" format="xml" multifile-model="true">
-    <data-source source="LOCAL" name="weather_aggregator" uuid="f0ad0faf-db4f-47ac-9e58-cf2cc1f492f3">
+    <data-source source="LOCAL" name="weather_aggregator [2]" uuid="ff3b139b-11b8-45e1-83fb-d0a17c2fdb11">
       <driver-ref>sqlite.xerial</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>org.sqlite.JDBC</jdbc-driver>
-      <jdbc-url>jdbc:sqlite:C:\Files\weather-aggregator\instance\weather_aggregator.db</jdbc-url>
+      <jdbc-url>jdbc:sqlite:C:\Files\weather-aggregator2\instance\weather_aggregator.db</jdbc-url>
       <working-dir>$ProjectFileDir$</working-dir>
       <libraries>
         <library>

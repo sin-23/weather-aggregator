@@ -10,8 +10,8 @@
 from flask_restful import Resource, reqparse
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask import request, Response, stream_with_context
-from datetime import datetime, time
-import json
+# from datetime import datetime, time
+import json, time, datetime
 from services.weather_functions import get_current_weather, get_forecast_with_date, get_forecast, get_detailed_forecast, compare_weather, get_climate_data, split_locations, get_trending_weather, get_seasonal_changes, get_historical_weather, get_suggested_activities, get_weather_recommendation, get_prediction_confidence
 from services.user_functions import get_default_location
 

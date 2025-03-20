@@ -1,7 +1,8 @@
 from models import db, UserSearchHistory, UserPreference, Subscription, CustomSubscription, UserLocation, Feedback
 from datetime import datetime
 from sqlalchemy import desc
-from alert_functions import ALERT_TYPES, ALERT_TYPE_PRECIP, ALERT_TYPE_WIND, ALERT_TYPE_TEMP
+from services.alert_functions import ALERT_TYPES, ALERT_TYPE_PRECIP, ALERT_TYPE_WIND, ALERT_TYPE_TEMP
+
 
 def log_user_search(user_id, location):
     """
