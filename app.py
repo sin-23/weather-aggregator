@@ -9,7 +9,7 @@ from models import db  # Import SQLAlchemy object
 from resources.weather import CurrentWeather, ForecastWithDate, RealTimeWeather, Next7DaysForecast, DetailedForecast, CompareWeather, ClimateData, TrendingWeather, SeasonalChanges, SuggestedActivities, WeatherRecommendation, PredictionConfidence, HistoricalWeather
 from resources.alerts import WeatherAlerts, SubscribeAlert, CancelAlert, CustomAlert
 from resources.utilities import  FeedbackResource, UserPreferences, UpdateLocation
-from auth import UserRegistration, UserLogin, ProtectedResource
+from auth import UserRegistration, UserLogin
 
 app = Flask(__name__)
 app.config.from_object(Config)
