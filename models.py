@@ -1,7 +1,5 @@
-# models.py
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
-import json
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
@@ -19,7 +17,6 @@ class User(db.Model):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
-
 class Subscription(db.Model):
     __tablename__ = "subscriptions"
     id = db.Column(db.Integer, primary_key=True)
@@ -30,20 +27,16 @@ class Subscription(db.Model):
 
     __table_args__ = (db.UniqueConstraint('user_id', 'location', 'alert_type', name='unique_subscription'),)
 
-
 class UserPreference(db.Model):
     __tablename__ = "user_preferences"
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.String(100), unique=True, nullable=False)
-    # Store only top searched locations as JSON (a list of strings)
     top_searches = db.Column(db.JSON, nullable=True)
 
     def set_preferences(self, top_searches):
-        """Stores a list of top searched locations."""
-        self.top_searches = top_searches  # expects a list of strings
+        self.top_searches = top_searches
 
     def get_preferences(self):
-        """Returns a dictionary with only the top searched locations."""
         return {"top_searches": self.top_searches or []}
 
     def __repr__(self):
@@ -68,13 +61,12 @@ class UserLocation(db.Model):
     location = db.Column(db.String(255), nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-
 class Feedback(db.Model):
    __tablename__ = "feedback"
    id = db.Column(db.Integer, primary_key=True)
    user_id = db.Column(db.String(100), nullable=False)
-   rating = db.Column(db.Integer, nullable=False)  # rating between 1 and 5
-   comment = db.Column(db.Text, nullable=True)     # optional comment
+   rating = db.Column(db.Integer, nullable=False)
+   comment = db.Column(db.Text, nullable=True)
    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class CustomSubscription(db.Model):
@@ -82,6 +74,6 @@ class CustomSubscription(db.Model):
     user_id = db.Column(db.Integer, nullable=False)
     location = db.Column(db.String(100), nullable=False)
     alert_type = db.Column(db.Integer, nullable=False)
-    operator = db.Column(db.String(2), nullable=True)  # For temperature and wind alerts
-    threshold = db.Column(db.String(20), nullable=True)  # Numeric threshold or precipitation level
+    operator = db.Column(db.String(2), nullable=True)
+    threshold = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

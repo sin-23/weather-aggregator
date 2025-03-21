@@ -3,13 +3,7 @@ from datetime import datetime
 from sqlalchemy import desc
 from services.alert_functions import ALERT_TYPES, ALERT_TYPE_PRECIP, ALERT_TYPE_WIND, ALERT_TYPE_TEMP
 
-
 def log_user_search(user_id, location):
-    """
-    Logs a user's search for a given location. If a record for that user and location exists,
-    increments the search_count and updates the last_searched timestamp. Otherwise, creates a new record.
-    Then updates the user's preferences with the top searched locations.
-    """
     record = UserSearchHistory.query.filter_by(user_id=user_id, location=location).first()
     if record:
         record.search_count += 1
@@ -19,22 +13,14 @@ def log_user_search(user_id, location):
         db.session.add(record)
     db.session.commit()
 
-    # Update preferences based on the entire search history for this user.
     update_user_preferences_from_history(user_id)
 
 def update_user_preferences_from_history(user_id):
-    """
-    Retrieves the user's search history from UserSearchHistory, orders the records by search_count descending,
-    takes the top 5 locations, and updates (or creates) the UserPreference record accordingly.
-    """
-    # Query the top 5 search history entries for the user, ordered by frequency.
     search_history = UserSearchHistory.query.filter_by(user_id=user_id) \
         .order_by(desc(UserSearchHistory.search_count)) \
         .limit(5).all()
-    # Build a list of locations in descending order of frequency.
     top_locations = [record.location for record in search_history]
 
-    # Update the UserPreference record.
     user_pref = UserPreference.query.filter_by(user_id=user_id).first()
     if user_pref:
         user_pref.top_searches = top_locations
@@ -44,10 +30,6 @@ def update_user_preferences_from_history(user_id):
     db.session.commit()
 
 def save_user_preferences(user_id, preferences):
-    """
-    Saves user preferences in the MySQL database.
-    If preferences already exist for the user, they are updated.
-    """
     user_pref = UserPreference.query.filter_by(user_id=user_id).first()
     if user_pref:
         user_pref.set_preferences(preferences)
@@ -59,19 +41,11 @@ def save_user_preferences(user_id, preferences):
     return f"Preferences for user {user_id} saved."
 
 def get_user_preferences(user_id):
-    """
-    Retrieves the user's top searched locations and active subscriptions.
-    Active subscriptions include normal subscriptions and custom alerts.
-    For custom alerts, a human-readable description is generated.
-    """
-    # Retrieve top searched locations.
     search_history = UserSearchHistory.query.filter_by(user_id=user_id)\
                       .order_by(desc(UserSearchHistory.search_count)).limit(5).all()
     top_locations = [record.location for record in search_history]
-
     subscriptions = []
 
-    # Normal subscriptions from Subscription table.
     normal_subs = Subscription.query.filter_by(user_id=user_id).all()
     for sub in normal_subs:
         try:
@@ -85,7 +59,6 @@ def get_user_preferences(user_id):
             "description": description
         })
 
-    # Custom subscriptions from CustomSubscription table.
     custom_subs = CustomSubscription.query.filter_by(user_id=user_id).all()
     for sub in custom_subs:
         if sub.alert_type == ALERT_TYPE_TEMP:
@@ -109,11 +82,6 @@ def get_user_preferences(user_id):
     }
 
 def get_default_location(user_id, provided_location=None):
-    """
-    Returns the provided_location if available.
-    Otherwise, retrieves the user's preferences and returns the top searched location.
-    If no preferences exist, returns None.
-    """
     if provided_location:
         return provided_location
     prefs = get_user_preferences(user_id)
@@ -123,9 +91,6 @@ def get_default_location(user_id, provided_location=None):
     return None
 
 def update_user_location(user_id, location):
-    """
-    Updates a user's location in the MySQL database.
-    """
     user_loc = UserLocation.query.filter_by(user_id=user_id).first()
     if user_loc:
         user_loc.location = location
@@ -136,10 +101,6 @@ def update_user_location(user_id, location):
     return f"User {user_id}'s location updated to {location}."
 
 def submit_feedback(user_id, rating, comment=""):
-    """
-    Stores user feedback (a rating between 1 and 5 and an optional comment) in the database.
-    Returns a tuple: (success: bool, message: str)
-    """
     try:
         rating = int(rating)
     except ValueError:

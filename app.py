@@ -1,11 +1,8 @@
-# app.py
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from flask_restful import Api
 from flask_jwt_extended import JWTManager
 from config import Config
-from models import db  # Import SQLAlchemy object
-
-# Import resource classes from the resources package
+from models import db
 from resources.weather import CurrentWeather, ForecastWithDate, RealTimeWeather, Next7DaysForecast, DetailedForecast, CompareWeather, ClimateData, TrendingWeather, SeasonalChanges, SuggestedActivities, WeatherRecommendation, PredictionConfidence, HistoricalWeather
 from resources.alerts import WeatherAlerts, SubscribeAlert, CancelAlert, CustomAlert
 from resources.utilities import  FeedbackResource, UserPreferences, UpdateLocation
@@ -17,10 +14,8 @@ db.init_app(app)
 api = Api(app)
 jwt = JWTManager(app)
 
-# Create the database tables if they don’t exist
 with app.app_context():
-     #db.drop_all()   # This will remove all existing tables.
-    db.create_all() # This will create tables based on your current models.
+    db.create_all()
 
 api.add_resource(UserRegistration, '/register')
 api.add_resource(UserLogin, '/login')
@@ -45,8 +40,6 @@ api.add_resource(CompareWeather, '/weather/compare')
 api.add_resource(TrendingWeather, '/weather/trending')
 api.add_resource(FeedbackResource, '/weather/feedback')
 
-
-# Global Error Handlers
 @app.errorhandler(400)
 def bad_request(error):
     return jsonify({"status": "error", "message": "Bad Request"}), 400

@@ -1,6 +1,6 @@
 from flask_restful import Resource, reqparse
 from models import db, User, Subscription, CustomSubscription
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import create_access_token
 from services.weather_functions import get_current_weather
 from services. alert_functions import evaluate_custom_alert, evaluate_normal_alert
 
@@ -20,7 +20,6 @@ class UserRegistration(Resource):
         db.session.commit()
         return {"status": "success", "message": "User registered successfully."}, 201
 
-
 class UserLogin(Resource):
     def post(self):
         parser = reqparse.RequestParser()
@@ -33,7 +32,6 @@ class UserLogin(Resource):
             access_token = create_access_token(identity=user.username)
             alerts = []
 
-            # Evaluate normal subscriptions.
             normal_subs = Subscription.query.filter_by(user_id=user.username).all()
             for sub in normal_subs:
                 weather = get_current_weather(sub.location)
@@ -41,7 +39,6 @@ class UserLogin(Resource):
                 if alert_msg:
                     alerts.append(alert_msg)
 
-            # Evaluate custom subscriptions.
             custom_subs = CustomSubscription.query.filter_by(user_id=user.username).all()
             for sub in custom_subs:
                 weather = get_current_weather(sub.location)
@@ -49,7 +46,6 @@ class UserLogin(Resource):
                 if alert_msg:
                     alerts.append(alert_msg)
 
-            # Remove duplicate alerts.
             alerts = list(set(alerts))
             return {"status": "success", "access_token": access_token, "alerts": alerts}, 200
 
